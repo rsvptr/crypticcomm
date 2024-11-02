@@ -1,5 +1,23 @@
 # CrypticComm - Secure RSA Communication Tool
 
+## Index
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Phase 1: RSA Key Generation (Group A)](#phase-1-rsa-key-generation-group-a)
+  - [Phase 2: Encryption (Group B)](#phase-2-encryption-group-b)
+  - [Phase 3: Decryption (Group A)](#phase-3-decryption-group-a)
+- [Example Execution](#example-execution)
+- [Important Notes](#important-notes)
+- [File Structure](#file-structure)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
 ## Overview
 
 CrypticComm is an RSA-based tool developed to facilitate secure communication between two groups through encryption and decryption. This tool provides a step-by-step implementation of key generation, encryption, and decryption processes, allowing users to engage practically with cryptographic principles using SageMath.
