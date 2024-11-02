@@ -32,7 +32,7 @@ Ensure you have the following installed to run CrypticComm:
 1. **Install SageMath** (if not already installed). Refer to the official SageMath installation guide [here](https://www.sagemath.org/download.html).
 2. Clone the GitHub repository:
     ```bash
-    git clone https://github.com/yourusername/CrypticComm.git
+    git clone https://github.com/rsvptr/CrypticComm.git
     ```
 3. Navigate to the cloned directory:
     ```bash
