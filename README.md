@@ -60,18 +60,18 @@ This phase generates RSA keys for secure communication. Group A will generate an
     sage key_generation.py
     ```
 2. The script will generate:
-    - Two 300-digit primes \( p \) and \( q \), ensuring they are distinct enough for secure factorization resistance.
-    - Modulus \( n = p \times q \).
-    - Totient \( \phi(n) \).
-    - A suitable public exponent \( e \).
-    - Private exponent \( d \).
+    - Two 300-digit primes `p` and `q`, ensuring they are distinct enough for secure factorization resistance.
+    - Modulus `n = p * q`.
+    - Totient `φ(n) = (p - 1) * (q - 1)`.
+    - A suitable public exponent `e`.
+    - Private exponent `d`.
 
 3. **Output**:
-    - Public Key (n, e) - to be shared with Group B.
-    - Private Key (n, d) - to remain with Group A for decryption.
+    - Public Key `(n, e)` - to be shared with Group B.
+    - Private Key `(n, d)` - to remain with Group A for decryption.
 
 **Code Explanation**:
-The code generates secure primes using SageMath’s `random_prime` function, ensuring that \( |p - q| \) meets a defined threshold to avoid factorization attacks (e.g., Fermat's). It uses random seeds for reproducibility and checks the suitability of \( e \) to ensure it is relatively prime to \( \phi(n) \).
+The code generates secure primes using SageMath’s `random_prime` function, ensuring that `|p - q|` meets a defined threshold to avoid factorization attacks (e.g., Fermat's). It uses random seeds for reproducibility and checks the suitability of `e` to ensure it is relatively prime to `φ(n)`.
 
 ### Phase 2: Encryption (Group B)
 
@@ -92,7 +92,7 @@ Group B encrypts a 100-word message (segmented into 10 parts) using the public k
 4. **Output**: Each segment will be encrypted and displayed as a list of encrypted integers. Group B sends these encrypted segments back to Group A.
 
 **Code Explanation**:
-Each message segment is converted to an integer using UTF-8 encoding, then encrypted using RSA’s modular exponentiation. The code ensures that each segment is small enough to avoid overflow relative to \( n \).
+Each message segment is converted to an integer using UTF-8 encoding, then encrypted using RSA’s modular exponentiation. The code ensures that each segment is small enough to avoid overflow relative to `n`.
 
 ### Phase 3: Decryption (Group A)
 
