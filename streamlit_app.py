@@ -2,6 +2,23 @@ import streamlit as st
 import requests
 import json
 
+# Add background image.
+def add_bg_from_url():
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-image: url("https://images.unsplash.com/photo-1730780897906-14c86766f584?q=80");
+            background-attachment: fixed;
+            background-size: cover;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+add_bg_from_url()
+
 # SageMathCell API endpoint (do not include trailing slash)
 SAGE_CELL_URL = "https://sagecell.sagemath.org/service"
 
