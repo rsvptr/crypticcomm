@@ -222,4 +222,3 @@ This project is licensed under the MIT License. See the LICENSE file for details
 ---
 
 CrypticComm is designed to help users explore the principles and applications of RSA encryption practically and securely. Whether for educational purposes or as a foundation for understanding encryption methods, CrypticComm serves as an accessible, hands-on cryptographic tool.
-```
