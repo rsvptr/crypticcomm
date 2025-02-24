@@ -1,6 +1,3 @@
-Below is the updated README in Markdown format that includes details about both the live deployment and the source code:
-
-```markdown
 # CrypticComm - Secure RSA Communication Tool
 
 ## Index
