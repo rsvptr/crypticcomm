@@ -1,3 +1,6 @@
+Below is the updated README in Markdown format that includes details about both the live deployment and the source code:
+
+```markdown
 # CrypticComm - Secure RSA Communication Tool
 
 ## Index
@@ -10,6 +13,8 @@
   - [Phase 1: RSA Key Generation (Group A)](#phase-1-rsa-key-generation-group-a)
   - [Phase 2: Encryption (Group B)](#phase-2-encryption-group-b)
   - [Phase 3: Decryption (Group A)](#phase-3-decryption-group-a)
+- [Live Deployment](#live-deployment)
+- [Source Code](#source-code)
 - [Example Execution](#example-execution)
 - [Important Notes](#important-notes)
 - [File Structure](#file-structure)
@@ -44,6 +49,8 @@ Ensure you have the following installed to run CrypticComm:
 
 - **SageMath**: CrypticComm uses SageMath for mathematical operations, including prime generation and modular exponentiation.
 - **Python 3.6+**: For script compatibility.
+
+---
 
 ## Installation
 
@@ -88,7 +95,7 @@ This phase generates RSA keys for secure communication. Group A will generate an
     - Public Key `(n, e)` - to be shared with Group B.
     - Private Key `(n, d)` - to remain with Group A for decryption.
 
-**Code Explanation**:
+**Code Explanation**:  
 The code generates secure primes using SageMath’s `random_prime` function, ensuring that `|p - q|` meets a defined threshold to avoid factorization attacks (e.g., Fermat's). It uses random seeds for reproducibility and checks the suitability of `e` to ensure it is relatively prime to `φ(n)`.
 
 ### Phase 2: Encryption (Group B)
@@ -109,7 +116,7 @@ Group B encrypts a 100-word message (segmented into 10 parts) using the public k
     ```
 4. **Output**: Each segment will be encrypted and displayed as a list of encrypted integers. Group B sends these encrypted segments back to Group A.
 
-**Code Explanation**:
+**Code Explanation**:  
 Each message segment is converted to an integer using UTF-8 encoding, then encrypted using RSA’s modular exponentiation. The code ensures that each segment is small enough to avoid overflow relative to `n`.
 
 ### Phase 3: Decryption (Group A)
@@ -130,8 +137,24 @@ Group A decrypts the message segments received from Group B using the private ke
     ```
 4. **Output**: The original message segments are printed, reconstructing the 100-word message from Group B.
 
-**Code Explanation**:
+**Code Explanation**:  
 Each encrypted integer is decrypted using modular exponentiation with the private key. The decrypted numbers are converted back to text using UTF-8 encoding, reconstructing the original message content.
+
+---
+
+## Live Deployment
+
+A live, interactive version of CrypticComm is available online. You can try out the tool, generate keys, encrypt messages, and decrypt messages through a user-friendly Streamlit dashboard.
+
+**Live Demo:** [crypticom.streamlit.app](https://crypticom.streamlit.app)
+
+---
+
+## Source Code
+
+The complete source code for CrypticComm is available on GitHub. Feel free to clone the repository, explore the code, and contribute improvements.
+
+**GitHub Repository:** [https://github.com/rsvptr/CrypticComm](https://github.com/rsvptr/CrypticComm)
 
 ---
 
@@ -202,3 +225,4 @@ This project is licensed under the MIT License. See the LICENSE file for details
 ---
 
 CrypticComm is designed to help users explore the principles and applications of RSA encryption practically and securely. Whether for educational purposes or as a foundation for understanding encryption methods, CrypticComm serves as an accessible, hands-on cryptographic tool.
+```
