@@ -204,6 +204,7 @@ Segment 2: <original text>
 - `encryption.py`: Handles encryption of message segments.
 - `decryption.py`: Manages decryption and reconstruction of the original message.
 - `README.md`: This document, providing an overview and usage instructions.
+- `streamlit_app.py`: Contains code for live deployment.
 
 ---
 
