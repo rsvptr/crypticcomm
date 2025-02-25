@@ -2,6 +2,12 @@ import streamlit as st
 import requests
 import json
 
+# Configure the Streamlit page.
+st.set_page_config(
+    page_title="CrypticComm",
+    layout="centered"
+)
+
 # Add background image.
 def add_bg_from_url():
     st.markdown(
@@ -18,12 +24,6 @@ def add_bg_from_url():
     )
 
 add_bg_from_url()
-
-# Configure the Streamlit page.
-st.set_page_config(
-    page_title="CrypticComm",
-    layout="centered"
-)
 
 # SageMathCell API endpoint (do not include trailing slash)
 SAGE_CELL_URL = "https://sagecell.sagemath.org/service"
