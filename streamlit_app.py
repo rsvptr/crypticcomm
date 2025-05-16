@@ -7,10 +7,14 @@ import datetime
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 
+# ----------- Utility Functions -----------
+
 def nowstr():
+    """Return the current timestamp as a compact string."""
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 def key_to_dict(key):
+    """Convert RSA key into serializable dictionary format (public and private)."""
     pub = key.publickey()
     return {
         "public": {"n": str(pub.n), "e": str(pub.e)},
@@ -24,6 +28,7 @@ def key_to_dict(key):
     }
 
 def download_button_dict(data, label, fname):
+    """Create a download button for a given dict, with a JSON filename."""
     json_bytes = json.dumps(data, indent=2).encode()
     return st.download_button(
         label=label,
@@ -33,6 +38,10 @@ def download_button_dict(data, label, fname):
     )
 
 def upload_json_dict(label, key=None):
+    """
+    Streamlit file uploader for JSON files.
+    Returns parsed data or None if nothing uploaded/invalid.
+    """
     uploaded = st.file_uploader(label, type=["json"], key=key)
     if uploaded:
         try:
@@ -43,21 +52,27 @@ def upload_json_dict(label, key=None):
     return None
 
 def text_to_int(text):
+    """Encode string as big integer."""
     return int.from_bytes(text.encode("utf-8"), byteorder="big")
 
 def int_to_text(i):
+    """Decode integer to UTF-8 string (handles padding automatically)."""
     try:
         return i.to_bytes((i.bit_length() + 7) // 8, byteorder="big").decode("utf-8")
     except Exception as e:
         return f"[Decode error: {e}]"
 
 def segment_message_utf8(msg, max_bytes):
+    """
+    Split a message into segments, each <= max_bytes, not breaking UTF-8 chars.
+    Ensures safe RSA encryption for each segment.
+    """
     msg_bytes = msg.encode("utf-8")
     segments = []
     idx = 0
     while idx < len(msg_bytes):
         seg_bytes = msg_bytes[idx:idx+max_bytes]
-        # Don't split multibyte UTF-8 char
+        # Don't split a multi-byte UTF-8 character at segment end
         while True:
             try:
                 seg_bytes.decode("utf-8")
@@ -69,11 +84,16 @@ def segment_message_utf8(msg, max_bytes):
     return segments
 
 def encrypt_segment(segment, n, e, use_oaep=False):
+    """
+    Encrypt one message segment using either textbook RSA or OAEP.
+    OAEP is safer for real use.
+    """
     if use_oaep:
         pubkey = RSA.construct((n, e))
         cipher = PKCS1_OAEP.new(pubkey)
         msg_bytes = segment.encode("utf-8")
         enc = cipher.encrypt(msg_bytes)
+        # Base64 encode so the result can be stored as a string
         return base64.b64encode(enc).decode()
     else:
         m = text_to_int(segment)
@@ -83,6 +103,10 @@ def encrypt_segment(segment, n, e, use_oaep=False):
         return str(c)
 
 def decrypt_segment(segment, n, d, use_oaep=False):
+    """
+    Decrypt one segment using textbook RSA or OAEP, as appropriate.
+    Returns string or error string.
+    """
     if use_oaep:
         try:
             privkey = RSA.construct((n, 65537, d))
@@ -100,9 +124,15 @@ def decrypt_segment(segment, n, d, use_oaep=False):
             return f"[Decryption error: {e}]"
 
 def clipboard_copy(text, label):
+    """
+    Show a code box with a 'Copy' button (manual copy, since Streamlit can't access clipboard directly).
+    """
     st.code(text, language="json")
     st.button("📋 Copy to clipboard (select and copy)", key=label, help="Copy this manually")
 
+# ----------- Streamlit App Layout/Logic -----------
+
+# Configure page and style background
 st.set_page_config(page_title="CrypticComm", layout="centered")
 st.markdown("""
     <style>
@@ -115,10 +145,12 @@ st.markdown("""
 
 st.title("🔐 CrypticComm: RSA Communication Tool")
 
+# Sidebar phase selection
 st.sidebar.title("Navigation")
 phase = st.sidebar.radio("Choose Phase", ["Key Generation", "Encryption", "Decryption"])
 
-# PHASE 1: KEY GENERATION
+# ---------------- PHASE 1: KEY GENERATION ----------------
+
 if phase == "Key Generation":
     st.header("Phase 1: Key Generation (Group A)")
     st.markdown("""
@@ -127,15 +159,18 @@ if phase == "Key Generation":
     - You can always redownload your keys after generation.
     """)
 
+    # User chooses key size (default 2048)
     keysize = st.number_input(
         "Key Size (bits)", min_value=1024, max_value=8192, value=2048, step=256,
         help="2048 bits is secure for educational use; 4096 for extra caution (slower)."
     )
 
+    # Store generated key in session so user can re-download it
     if "generated_key" not in st.session_state:
         st.session_state.generated_key = None
         st.session_state.generated_time = None
 
+    # Generate new key when button pressed
     if st.button("🔑 Generate New RSA Keys"):
         with st.spinner("Generating keys..."):
             key = RSA.generate(keysize)
@@ -143,6 +178,7 @@ if phase == "Key Generation":
             st.session_state.generated_time = nowstr()
         st.success("RSA key pair generated!")
 
+    # If a key has been generated, show download, display options
     if st.session_state.generated_key:
         public_key = st.session_state.generated_key["public"]
         private_key = st.session_state.generated_key["private"]
@@ -160,10 +196,12 @@ if phase == "Key Generation":
         download_button_dict(private_key, f"⬇️ Download Private Key ({gen_time})", f"rsa_priv_{gen_time}.json")
         st.warning("NEVER share your private key. Store it securely.")
 
+        # For technical details
         with st.expander("Key Details"):
             st.json(st.session_state.generated_key)
 
-# PHASE 2: ENCRYPTION
+# ---------------- PHASE 2: ENCRYPTION ----------------
+
 elif phase == "Encryption":
     st.header("Phase 2: Encryption (Group B)")
     st.markdown("""
@@ -173,6 +211,7 @@ elif phase == "Encryption":
     4. Download/share the resulting encrypted message.
     """)
 
+    # Step 1: Load public key
     st.subheader("1. Public Key")
     pub_data = upload_json_dict("Upload Public Key (.json)", key="enc_pub_upload")
     if not pub_data:
@@ -182,11 +221,11 @@ elif phase == "Encryption":
             key="enc_pub_paste"
         )
         pub_data = None
+        # Only parse if user really entered JSON (not empty, not placeholder)
         if pub_raw.strip() and not pub_raw.strip().startswith("{") and not pub_raw.strip().startswith("["):
             st.info("Paste the public key JSON here if not uploading.")
         else:
             try:
-                # Only parse if the user actually pasted JSON (not left as empty or as a placeholder)
                 if pub_raw.strip() and pub_raw.strip() not in ["", "...", '"..."']:
                     pub_data = json.loads(pub_raw)
             except Exception:
@@ -197,6 +236,7 @@ elif phase == "Encryption":
     keysize_bits = None
     if pub_data:
         try:
+            # Parse modulus and exponent
             n = int(pub_data["n"])
             e = int(pub_data["e"])
             keysize_bits = n.bit_length()
@@ -206,18 +246,21 @@ elif phase == "Encryption":
             n, e, pubkey = None, None, None
             st.warning("Waiting for valid public key input...")
 
+    # Step 2: Enter message
     st.subheader("2. Your Message")
     message = st.text_area(
         "Enter your message (UTF-8 supported)", "",
         help="Messages are split into segments that fit into the key size."
     )
 
+    # Step 3: Select padding scheme (OAEP is safest)
     st.subheader("3. Encryption Options")
     use_oaep = st.checkbox(
         "Use OAEP Padding (highly recommended)", value=True,
         help="OAEP prevents deterministic attacks. Only turn off for textbook RSA demonstration."
     )
 
+    # Compute segment size and show info
     max_seg_bytes = 0
     if pubkey:
         try:
@@ -229,12 +272,14 @@ elif phase == "Encryption":
         except Exception:
             pass
 
+    # Step 4: Encrypt on button press (after key+message entered)
     encrypt_clicked = st.button("🔒 Encrypt Message")
     if encrypt_clicked:
         if not (pubkey and message.strip()):
             st.error("Please provide a valid public key and a non-empty message before encrypting.")
         else:
             try:
+                # Split message and encrypt each segment
                 segments = segment_message_utf8(message, max_seg_bytes)
                 st.success(f"Your message is split into {len(segments)} segment(s).")
                 encrypted = []
@@ -246,6 +291,7 @@ elif phase == "Encryption":
                     except Exception as err:
                         st.error(f"Segment {i} error: {err}")
                         encrypted.append(f"[Error: {err}]")
+                # Build JSON output and provide download
                 output = {
                     "segments": encrypted,
                     "oaep": use_oaep,
@@ -259,7 +305,8 @@ elif phase == "Encryption":
             except Exception as ex:
                 st.error(f"Encryption failed: {ex}")
 
-# PHASE 3: DECRYPTION
+# ---------------- PHASE 3: DECRYPTION ----------------
+
 elif phase == "Decryption":
     st.header("Phase 3: Decryption (Group A)")
     st.markdown("""
@@ -268,6 +315,7 @@ elif phase == "Decryption":
     3. Decrypt to reconstruct the original message.
     """)
 
+    # Step 1: Load private key
     st.subheader("1. Private Key")
     priv_data = upload_json_dict("Upload Private Key (.json)", key="dec_priv_upload")
     if not priv_data:
@@ -277,6 +325,7 @@ elif phase == "Decryption":
             key="dec_priv_paste"
         )
         priv_data = None
+        # Only parse if user entered JSON, not blank/placeholder
         if priv_raw.strip() and not priv_raw.strip().startswith("{") and not priv_raw.strip().startswith("["):
             st.info("Paste your private key JSON here if not uploading.")
         else:
@@ -299,6 +348,7 @@ elif phase == "Decryption":
             n, d, privkey = None, None, None
             st.warning("Waiting for valid private key input...")
 
+    # Step 2: Load encrypted message
     st.subheader("2. Encrypted Message")
     enc_data = upload_json_dict("Upload Encrypted Message (.json)", key="dec_enc_upload")
     segments, use_oaep = [], False
@@ -322,6 +372,7 @@ elif phase == "Decryption":
         use_oaep = enc_data.get("oaep", False)
         st.info(f"{len(segments)} encrypted segment(s) loaded. OAEP: {'yes' if use_oaep else 'no'}.")
 
+    # Step 3: Decrypt when button pressed and data valid
     decrypt_clicked = st.button("🔓 Decrypt Message")
     if decrypt_clicked:
         if not (privkey and segments):
@@ -342,6 +393,7 @@ elif phase == "Decryption":
             if errors:
                 st.warning(f"{errors} segment(s) failed to decrypt.")
 
+# ---- Footer ----
 st.markdown("""
 <hr>
 <small>
