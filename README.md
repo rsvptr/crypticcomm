@@ -32,7 +32,7 @@
 
 - **One-Click RSA Key Generation**: Quickly create secure RSA key pairs at selectable bit lengths.
 - **End-to-End Message Encryption**: Safely encrypt any text, with automatic UTF-8-safe segmentation for long messages.
-- **Robust Decryption**: Recover segmented messages using your private key—no manual coding required.
+- **Robust Decryption**: Recover segmented messages using your private key - no manual coding required.
 - **OAEP Padding**: Use textbook RSA or secure OAEP padding for modern cryptographic safety.
 - **File-Based Workflows**: Download and share public/private keys and encrypted messages as JSON files.
 - **Privacy First**: All processing is local; nothing is sent to any backend or third party.
