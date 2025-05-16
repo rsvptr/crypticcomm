@@ -1,7 +1,5 @@
 # CrypticComm - Interactive RSA Communication Tool
 
-![CrypticComm Logo](https://images.unsplash.com/photo-1636956026491-86a9da7001c9?q=80&auto=format&fit=cover&w=1200&q=80)
-
 > **A simple, educational, and privacy-first app for learning and demonstrating RSA public-key cryptography in your browser.**
 
 ---
