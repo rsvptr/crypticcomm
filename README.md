@@ -1,9 +1,3 @@
-Absolutely! Here’s a **modernized, clear, and attractive README** for your new all-in-one Streamlit RSA tool.
-It is designed for clarity, new users, contributors, and reviewers. It reflects your current implementation, **removes SageMath**, highlights local-only Python crypto, and streamlines the workflow.
-
----
-
-````markdown
 # CrypticComm - Interactive RSA Communication Tool
 
 ![CrypticComm Logo](https://images.unsplash.com/photo-1636956026491-86a9da7001c9?q=80&auto=format&fit=cover&w=1200&q=80)
