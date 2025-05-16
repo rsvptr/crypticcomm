@@ -1,256 +1,284 @@
 import streamlit as st
-import requests
+import base64
 import json
+from Crypto.Util import number
+from Crypto.Random import get_random_bytes
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+import io
 
-# Configure the Streamlit page.
-st.set_page_config(
-    page_title="CrypticComm",
-    layout="centered"
-)
+# ---- Streamlit Page Config ----
+st.set_page_config(page_title="CrypticComm", layout="centered")
+st.markdown("""
+    <style>
+    .stApp { 
+        background-image: url("https://images.unsplash.com/photo-1636956026491-86a9da7001c9?q=80");
+        background-size: cover;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# Add background image.
-def add_bg_from_url():
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            background-image: url("https://images.unsplash.com/photo-1636956026491-86a9da7001c9?q=80");
-            background-attachment: fixed;
-            background-size: cover;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+st.title("🔐 CrypticComm: RSA Communication Tool Dashboard")
 
-add_bg_from_url()
+# ---- Sidebar: Phase Selector ----
+phase = st.sidebar.radio("Select Phase", ["Key Generation", "Encryption", "Decryption"])
+st.sidebar.info("All operations are performed locally in your browser for privacy.")
 
-# SageMathCell API endpoint (do not include trailing slash)
-SAGE_CELL_URL = "https://sagecell.sagemath.org/service"
+# ---- Helper Functions ----
 
-def run_sage_code(code: str) -> str:
-    """
-    Sends URL-encoded SageMath code to the SageMathCell API and returns its output.
-    """
-    # URL-encode the code as required by the SageMathCell API.
-    payload = "code=" + requests.utils.quote(code)
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+def generate_rsa_keypair(bits=2048):
+    """Generate an RSA keypair using PyCryptodome."""
+    key = RSA.generate(bits)
+    return key
+
+def get_key_as_dict(key):
+    """Extract public/private components as dicts for serialization."""
+    pub = key.publickey()
+    return {
+        "public": {"n": str(pub.n), "e": str(pub.e)},
+        "private": {"d": str(key.d), "n": str(key.n), "e": str(key.e), "p": str(key.p), "q": str(key.q)}
+    }
+
+def save_keyfile(data, filename):
+    b = io.BytesIO()
+    b.write(json.dumps(data, indent=2).encode())
+    b.seek(0)
+    st.download_button(f"⬇️ Download {filename}", b, file_name=filename, mime="application/json")
+
+def load_keyfile(uploaded_file):
     try:
-        response = requests.post(SAGE_CELL_URL, data=payload, headers=headers, timeout=60)
-        if response.status_code != 200:
-            return f"Error: Received status code {response.status_code}"
-        result = response.json()
-        stdout = result.get("stdout", "")
-        return stdout if stdout.strip() else "No output received."
+        content = uploaded_file.read()
+        return json.loads(content)
     except Exception as e:
-        return f"Error calling SageMathCell API: {e}"
+        st.error(f"Error loading key file: {e}")
+        return None
 
-st.title("CrypticComm: RSA Communication Tool Dashboard")
+def text_to_int(text):
+    """Convert UTF-8 string to int."""
+    return int.from_bytes(text.encode("utf-8"), byteorder="big")
 
-# ─────────────────────────────────────────────────────────────
-# Connectivity Test (Sidebar)
-# ─────────────────────────────────────────────────────────────
-st.sidebar.subheader("SageMathCell Connectivity Test")
-if st.sidebar.button("Run Connectivity Test"):
-    test_code = "print('SageMathCell Connectivity Test: OK')"
-    test_output = run_sage_code(test_code)
-    if "OK" in test_output:
-        st.sidebar.success("Successfully connected to SageMathCell server!")
+def int_to_text(i):
+    """Convert int back to UTF-8 string."""
+    try:
+        return i.to_bytes((i.bit_length() + 7) // 8, byteorder="big").decode("utf-8")
+    except Exception as e:
+        return f"[Decoding error: {e}]"
+
+def segment_message(msg, n, safe_mode=True):
+    """Split the message so each segment can fit into n-1 bits."""
+    # Safe mode: segment at bytes level to avoid breaking UTF-8 multibyte chars
+    max_bytes = (n.bit_length() - 1) // 8
+    msg_bytes = msg.encode("utf-8")
+    segments = []
+    idx = 0
+    while idx < len(msg_bytes):
+        seg_bytes = msg_bytes[idx:idx+max_bytes]
+        # Ensure we don't split a multibyte character
+        while True:
+            try:
+                seg_bytes.decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                seg_bytes = seg_bytes[:-1]
+        segments.append(seg_bytes.decode("utf-8"))
+        idx += len(seg_bytes)
+    return segments
+
+def encrypt_segment(plain_text, n, e, use_oaep=False):
+    if use_oaep:
+        pubkey = RSA.construct((n, e))
+        cipher = PKCS1_OAEP.new(pubkey)
+        # OAEP limits message size: k - 2*hLen - 2
+        max_bytes = (pubkey.size_in_bytes()) - 2*20 - 2
+        msg_bytes = plain_text.encode("utf-8")
+        if len(msg_bytes) > max_bytes:
+            raise ValueError("Message segment too large for modulus (OAEP).")
+        encrypted = cipher.encrypt(msg_bytes)
+        return base64.b64encode(encrypted).decode()
     else:
-        st.sidebar.error("Failed to connect to SageMathCell server.")
-    st.sidebar.text_area("Test Output", test_output, height=100)
+        m = text_to_int(plain_text)
+        if m >= n:
+            raise ValueError("Message segment is too large for modulus n.")
+        c = pow(m, e, n)
+        return str(c)
 
-# ─────────────────────────────────────────────────────────────
-# Phase Selector
-# ─────────────────────────────────────────────────────────────
-phase = st.sidebar.selectbox("Select Phase", ["Key Generation", "Encryption", "Decryption"])
+def decrypt_segment(ciphertext, n, d, use_oaep=False):
+    if use_oaep:
+        privkey = RSA.construct((n, 65537, d))
+        cipher = PKCS1_OAEP.new(privkey)
+        try:
+            ct = base64.b64decode(ciphertext)
+            pt_bytes = cipher.decrypt(ct)
+            return pt_bytes.decode("utf-8")
+        except Exception as e:
+            return f"[Decryption error: {e}]"
+    else:
+        try:
+            c = int(ciphertext)
+            m = pow(c, d, n)
+            return int_to_text(m)
+        except Exception as e:
+            return f"[Decryption error: {e}]"
 
-# ─────────────────────────────────────────────────────────────
-# Phase 1: Key Generation
-# ─────────────────────────────────────────────────────────────
+# ---- Phase 1: Key Generation ----
 if phase == "Key Generation":
     st.header("Phase 1: RSA Key Generation (Group A)")
-    st.markdown(
-        "Click the button below to generate RSA keys with 300-digit primes. The **public key** "
-        "will be shared with Group B, and the **private key** will remain confidential."
-    )
-    if st.button("Generate RSA Keys"):
-        sage_code = r"""
-from sage.all import *
-import time, json
 
-# Set random seed based on current time
-seed_primes = int(time.time())
-set_random_seed(seed_primes)
-min_limit = Integer(10**299)
-max_limit = Integer(10**300 - 1)
+    st.markdown("""
+        Generate RSA key pairs for secure communication.
+        - **Public Key (n, e)**: Share this with Group B.
+        - **Private Key (d, n, e, p, q)**: Keep this secure, use for decryption.
+        """)
+    bits = st.number_input("Key Size (bits)", min_value=1024, max_value=8192, value=2048, step=256)
+    if st.button("🔑 Generate RSA Keys"):
+        with st.spinner("Generating secure primes..."):
+            key = generate_rsa_keypair(bits)
+            key_dict = get_key_as_dict(key)
+        st.success("RSA Key Pair Generated!")
 
-def generate_prime():
-    while True:
-        candidate = random_prime(max_limit, lbound=min_limit)
-        if candidate.ndigits() == 300:
-            return candidate
+        st.subheader("Public Key")
+        st.code(json.dumps(key_dict["public"], indent=2), language="json")
+        save_keyfile(key_dict["public"], "rsa_public_key.json")
+        st.write("")
 
-# Generate prime p
-p = generate_prime()
+        st.subheader("Private Key")
+        st.code(json.dumps(key_dict["private"], indent=2), language="json")
+        save_keyfile(key_dict["private"], "rsa_private_key.json")
+        st.warning("Keep your private key file secure!")
 
-# Generate prime q such that |p - q| is large enough
-difference_threshold = Integer(10**200)
-max_trials = 1000
-trial = 0
-while trial < max_trials:
-    q = generate_prime()
-    if abs(p - q) >= difference_threshold:
-        break
-    trial += 1
+        # Option to show all parameters if wanted
+        with st.expander("Show key details"):
+            st.json(key_dict)
 
-# Compute modulus and totient
-n = p * q
-phi_n = (p - 1) * (q - 1)
-
-# Select public exponent e
-def select_public_exponent(phi):
-    while True:
-        e_candidate = randint(2**16, phi - 1)
-        if gcd(e_candidate, phi) == 1:
-            return e_candidate
-
-e = select_public_exponent(phi_n)
-d = inverse_mod(e, phi_n)
-
-# Output the keys as JSON
-print(json.dumps({
-    "public": {
-        "n": str(n),
-        "e": str(e)
-    },
-    "private": {
-        "d": str(d)
-    }
-}))
-"""
-        output = run_sage_code(sage_code)
-        try:
-            key_data = json.loads(output)
-            public_key = key_data.get("public", {})
-            private_key = key_data.get("private", {})
-            formatted_output = (
-                "### Public Key:\n\n"
-                f"**n:** {public_key.get('n', '')}\n\n"
-                f"**e:** {public_key.get('e', '')}\n\n"
-                "### Private Key:\n\n"
-                f"**d:** {private_key.get('d', '')}"
-            )
-        except Exception as ex:
-            formatted_output = f"Error parsing key data:\n{output}"
-        st.markdown(formatted_output)
-
-# ─────────────────────────────────────────────────────────────
-# Phase 2: Encryption
-# ─────────────────────────────────────────────────────────────
+# ---- Phase 2: Encryption ----
 elif phase == "Encryption":
     st.header("Phase 2: Message Encryption (Group B)")
-    st.markdown(
-        "Enter the **public key** parameters, n and e provided by Group A and type your message "
-        "segments (one per line). Each segment will be encrypted using RSA."
-    )
-    n_val = st.text_input("Public Key (n)", placeholder="Enter modulus, n")
-    e_val = st.text_input("Public Exponent (e)", placeholder="Enter exponent, e")
-    segments_text = st.text_area("Message Segments", 
-                                 placeholder="Enter one message segment per line")
-    if st.button("Encrypt Message Segments"):
-        if not n_val or not e_val:
-            st.error("Please provide both n and e values.")
-        else:
-            segments = [seg for seg in segments_text.splitlines() if seg.strip() != ""]
-            segments_json = json.dumps(segments)
-            sage_code = f"""
-from sage.all import *
-import json
 
-def text_to_number(text):
-    bytes_rep = text.encode('utf-8')
-    return Integer(int.from_bytes(bytes_rep, 'big'))
+    st.markdown("""
+        1. Load or paste the **public key** `(n, e)` from Group A.
+        2. Write your message (recommended: short segments for clarity).
+        3. Choose encryption padding.
+        4. Encrypt!  
+        Encrypted message segments can be sent to Group A for decryption.
+        """)
+    st.subheader("1. Provide Public Key")
+    pub_key_file = st.file_uploader("Upload Public Key JSON", type=["json"])
+    if pub_key_file:
+        pub_key = load_keyfile(pub_key_file)
+        n = int(pub_key["n"])
+        e = int(pub_key["e"])
+    else:
+        n = st.text_input("Public Key Modulus (n)")
+        e = st.text_input("Public Key Exponent (e)")
+        try:
+            n = int(n)
+            e = int(e)
+        except Exception:
+            n = None
+            e = None
 
-n = Integer({n_val})
-e = Integer({e_val})
-segments = {segments_json}
-encrypted_segments = []
+    st.subheader("2. Enter Your Message")
+    message = st.text_area("Message to encrypt", placeholder="Enter your message here...")
 
-for text in segments:
-    number = text_to_number(text)
-    if number >= n:
-        print("Error: A segment is too large for the modulus n.")
-        exit()
-    cipher = power_mod(number, e, n)
-    encrypted_segments.append(str(cipher))
+    st.subheader("3. Encryption Settings")
+    use_oaep = st.checkbox("Use OAEP Padding (recommended for security)", value=True)
 
-print(json.dumps({{"encrypted_segments": encrypted_segments}}))
-"""
-            output = run_sage_code(sage_code)
-            try:
-                data = json.loads(output)
-                enc_list = data.get("encrypted_segments", [])
-                formatted_output = "### Encrypted Segments:\n"
-                for i, cipher in enumerate(enc_list, 1):
-                    formatted_output += f"\n**Segment {i}:**\n{cipher}\n"
-            except Exception as ex:
-                formatted_output = f"Error parsing encrypted data:\n{output}"
-            st.markdown(formatted_output)
+    if st.button("🔒 Encrypt Message") and n and e and message:
+        try:
+            # Split message into valid-length segments
+            if use_oaep:
+                # OAEP limits: 190 bytes for 2048 bits, 446 for 4096, etc.
+                pubkey = RSA.construct((n, e))
+                max_bytes = pubkey.size_in_bytes() - 2*20 - 2
+            else:
+                max_bytes = (n.bit_length() - 1) // 8
+            segments = segment_message(message, n, safe_mode=True)
+            st.info(f"Message split into {len(segments)} segments (max bytes per segment: {max_bytes}).")
+            encrypted = []
+            for i, seg in enumerate(segments, 1):
+                ct = encrypt_segment(seg, n, e, use_oaep=use_oaep)
+                encrypted.append(ct)
+                st.success(f"Segment {i}: encrypted.")
 
-# ─────────────────────────────────────────────────────────────
-# Phase 3: Decryption
-# ─────────────────────────────────────────────────────────────
+            enc_json = json.dumps({
+                "segments": encrypted,
+                "oaep": use_oaep,
+                "num_segments": len(segments)
+            }, indent=2)
+
+            st.markdown("### Encrypted Message Segments")
+            st.code(enc_json, language="json")
+            save_keyfile(json.loads(enc_json), "encrypted_message.json")
+
+        except Exception as ex:
+            st.error(f"Encryption failed: {ex}")
+
+# ---- Phase 3: Decryption ----
 elif phase == "Decryption":
     st.header("Phase 3: Message Decryption (Group A)")
-    st.markdown(
-        "Enter the **modulus, n** and your **private key**, d along with the encrypted message segments "
-        "received from Group B. The tool will decrypt the segments and reconstruct the original message."
-    )
-    n_val = st.text_input("Modulus (n)", placeholder="Enter modulus, n", key="n_decrypt")
-    d_val = st.text_input("Private Exponent (d)", placeholder="Enter private exponent, d", key="d_decrypt")
-    encrypted_segments_text = st.text_area("Encrypted Segments", 
-                                           placeholder="Enter one ciphertext per line")
-    if st.button("Decrypt Message Segments"):
-        if not n_val or not d_val:
-            st.error("Please provide both n and d values.")
-        else:
-            segments = [seg for seg in encrypted_segments_text.splitlines() if seg.strip() != ""]
-            segments_json = json.dumps(segments)
-            sage_code = f"""
-from sage.all import *
-import json
+    st.markdown("""
+        1. Load your **private key** and receive the encrypted message JSON from Group B.
+        2. The tool will decrypt each segment and reconstruct the original message.
+        """)
 
-def number_to_text(number):
-    hex_str = '%x' % number
-    if len(hex_str) % 2 != 0:
-        hex_str = '0' + hex_str
-    bytes_rep = bytes.fromhex(hex_str)
-    return bytes_rep.decode('utf-8')
+    st.subheader("1. Load Private Key")
+    priv_key_file = st.file_uploader("Upload Private Key JSON", type=["json"])
+    if priv_key_file:
+        priv_key = load_keyfile(priv_key_file)
+        n = int(priv_key["n"])
+        d = int(priv_key["d"])
+        e = int(priv_key["e"])
+    else:
+        n = st.text_input("Private Key Modulus (n)")
+        d = st.text_input("Private Exponent (d)")
+        e = st.text_input("Public Exponent (e)", value="65537")
+        try:
+            n = int(n)
+            d = int(d)
+            e = int(e)
+        except Exception:
+            n = None
+            d = None
+            e = None
 
-n = Integer({n_val})
-d = Integer({d_val})
-segments = {segments_json}
-decrypted_segments = []
+    st.subheader("2. Load Encrypted Segments")
+    enc_file = st.file_uploader("Upload Encrypted Segments JSON", type=["json"])
+    if enc_file:
+        enc_data = load_keyfile(enc_file)
+        segments = enc_data["segments"]
+        use_oaep = enc_data.get("oaep", False)
+    else:
+        enc_segments_text = st.text_area("Paste Encrypted Segments (JSON array)", placeholder='["..."]')
+        try:
+            enc_data = json.loads(enc_segments_text)
+            segments = enc_data["segments"] if isinstance(enc_data, dict) else enc_data
+            use_oaep = enc_data.get("oaep", False) if isinstance(enc_data, dict) else False
+        except Exception:
+            segments = []
+            use_oaep = False
 
-for cipher in segments:
-    cipher_int = Integer(cipher)
-    number = power_mod(cipher_int, d, n)
-    try:
-        text = number_to_text(number)
-    except Exception as error:
-        text = "Error decoding segment: " + str(error)
-    decrypted_segments.append(text)
+    if st.button("🔓 Decrypt Segments") and n and d and segments:
+        decrypted = []
+        errors = 0
+        for i, ct in enumerate(segments, 1):
+            pt = decrypt_segment(ct, n, d, use_oaep=use_oaep)
+            if pt.startswith("[Decryption error"):
+                errors += 1
+                st.error(f"Segment {i}: {pt}")
+            else:
+                st.success(f"Segment {i}: {pt}")
+            decrypted.append(pt)
+        st.markdown("### Decrypted Message (Concatenated):")
+        st.code("".join([pt for pt in decrypted if not pt.startswith("[Decryption error")]), language="text")
+        if errors:
+            st.warning(f"{errors} segment(s) could not be decoded.")
 
-print(json.dumps({{"decrypted_segments": decrypted_segments}}))
-"""
-            output = run_sage_code(sage_code)
-            try:
-                data = json.loads(output)
-                dec_list = data.get("decrypted_segments", [])
-                formatted_output = "### Decrypted Message Segments:\n"
-                for i, segment in enumerate(dec_list, 1):
-                    formatted_output += f"\n**Segment {i}:**\n{segment}\n"
-            except Exception as ex:
-                formatted_output = f"Error parsing decrypted data:\n{output}"
-            st.markdown(formatted_output)
+# ---- Footer ----
+st.markdown("""
+<hr>
+<small>
+    CrypticComm: All cryptography performed in-browser with PyCryptodome. 
+    <br>
+    <b>Warning:</b> For educational use only; do not use for production secrets!
+</small>
+""", unsafe_allow_html=True)
