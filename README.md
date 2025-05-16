@@ -171,5 +171,3 @@ MIT License (see [LICENSE](LICENSE))
 ---
 
 *Built with ❤️ by [rsvptr](https://github.com/rsvptr) and the open-source cryptography community.*
-
-```
