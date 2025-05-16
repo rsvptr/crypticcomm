@@ -24,9 +24,7 @@
 
 ## Overview
 
-**CrypticComm** is a hands-on web app for experimenting with secure RSA communication between two groups (or users), designed for cryptography courses, demonstrations, and learning.  
-It provides a step-by-step workflow for key generation, message encryption, and decryption—**all within your browser, powered by Python and Streamlit**.  
-No SageMath, no server-side processing: all cryptography is done locally for maximum privacy and transparency.
+**CrypticComm** is a hands-on web app for experimenting with secure RSA communication between two groups (or users), designed for cryptography courses, demonstrations, and learning.   It provides a step-by-step workflow for key generation, message encryption, and decryptio - **all within your browser, powered by Python and Streamlit**.  No server-side processing: all cryptography is done locally for maximum privacy and transparency.
 
 ---
 
