@@ -7,8 +7,6 @@ import datetime
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 
-# -------------- Helper Functions --------------
-
 def nowstr():
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -105,7 +103,6 @@ def clipboard_copy(text, label):
     st.code(text, language="json")
     st.button("📋 Copy to clipboard (select and copy)", key=label, help="Copy this manually")
 
-# ----------- Streamlit Page Config -----------
 st.set_page_config(page_title="CrypticComm", layout="centered")
 st.markdown("""
     <style>
@@ -121,8 +118,7 @@ st.title("🔐 CrypticComm: RSA Communication Tool")
 st.sidebar.title("Navigation")
 phase = st.sidebar.radio("Choose Phase", ["Key Generation", "Encryption", "Decryption"])
 
-# ---------------- PHASE 1: Key Generation ----------------
-
+# PHASE 1: KEY GENERATION
 if phase == "Key Generation":
     st.header("Phase 1: Key Generation (Group A)")
     st.markdown("""
@@ -167,8 +163,7 @@ if phase == "Key Generation":
         with st.expander("Key Details"):
             st.json(st.session_state.generated_key)
 
-# ---------------- PHASE 2: Encryption ----------------
-
+# PHASE 2: ENCRYPTION
 elif phase == "Encryption":
     st.header("Phase 2: Encryption (Group B)")
     st.markdown("""
@@ -181,14 +176,25 @@ elif phase == "Encryption":
     st.subheader("1. Public Key")
     pub_data = upload_json_dict("Upload Public Key (.json)", key="enc_pub_upload")
     if not pub_data:
-        pub_example = '{"n": "…", "e": "65537"}'
-        pub_raw = st.text_area("Or paste Public Key JSON", pub_example, key="enc_pub_paste")
-        try:
-            pub_data = json.loads(pub_raw)
-        except Exception:
-            st.info("Paste the public key here if not uploading.")
-            pub_data = None
+        pub_raw = st.text_area(
+            "Or paste Public Key JSON",
+            placeholder='{"n": "<RSA modulus>", "e": "65537"}',
+            key="enc_pub_paste"
+        )
+        pub_data = None
+        if pub_raw.strip() and not pub_raw.strip().startswith("{") and not pub_raw.strip().startswith("["):
+            st.info("Paste the public key JSON here if not uploading.")
+        else:
+            try:
+                # Only parse if the user actually pasted JSON (not left as empty or as a placeholder)
+                if pub_raw.strip() and pub_raw.strip() not in ["", "...", '"..."']:
+                    pub_data = json.loads(pub_raw)
+            except Exception:
+                pass
 
+    n, e = None, None
+    pubkey = None
+    keysize_bits = None
     if pub_data:
         try:
             n = int(pub_data["n"])
@@ -197,10 +203,8 @@ elif phase == "Encryption":
             pubkey = RSA.construct((n, e))
             st.success(f"Public key loaded. Key size: {keysize_bits} bits.")
         except Exception as ex:
-            st.error(f"Invalid key data: {ex}")
-            n, e = None, None
-    else:
-        n, e = None, None
+            n, e, pubkey = None, None, None
+            st.warning("Waiting for valid public key input...")
 
     st.subheader("2. Your Message")
     message = st.text_area(
@@ -215,7 +219,7 @@ elif phase == "Encryption":
     )
 
     max_seg_bytes = 0
-    if n and e:
+    if pubkey:
         try:
             if use_oaep:
                 max_seg_bytes = pubkey.size_in_bytes() - 2*20 - 2
@@ -226,37 +230,36 @@ elif phase == "Encryption":
             pass
 
     encrypt_clicked = st.button("🔒 Encrypt Message")
-    if encrypt_clicked and not (n and e):
-        st.error("Please provide a valid public key before encrypting.")
+    if encrypt_clicked:
+        if not (pubkey and message.strip()):
+            st.error("Please provide a valid public key and a non-empty message before encrypting.")
+        else:
+            try:
+                segments = segment_message_utf8(message, max_seg_bytes)
+                st.success(f"Your message is split into {len(segments)} segment(s).")
+                encrypted = []
+                for i, seg in enumerate(segments, 1):
+                    try:
+                        ct = encrypt_segment(seg, n, e, use_oaep=use_oaep)
+                        encrypted.append(ct)
+                        st.info(f"Segment {i}: encrypted.")
+                    except Exception as err:
+                        st.error(f"Segment {i} error: {err}")
+                        encrypted.append(f"[Error: {err}]")
+                output = {
+                    "segments": encrypted,
+                    "oaep": use_oaep,
+                    "num_segments": len(segments),
+                    "key_bits": n.bit_length()
+                }
+                enc_time = nowstr()
+                st.subheader("Encrypted Segments")
+                st.code(json.dumps(output, indent=2), language="json")
+                download_button_dict(output, f"⬇️ Download Encrypted Message ({enc_time})", f"rsa_encrypted_{enc_time}.json")
+            except Exception as ex:
+                st.error(f"Encryption failed: {ex}")
 
-    if encrypt_clicked and n and e and message:
-        try:
-            segments = segment_message_utf8(message, max_seg_bytes)
-            st.success(f"Your message is split into {len(segments)} segment(s).")
-            encrypted = []
-            for i, seg in enumerate(segments, 1):
-                try:
-                    ct = encrypt_segment(seg, n, e, use_oaep=use_oaep)
-                    encrypted.append(ct)
-                    st.info(f"Segment {i}: encrypted.")
-                except Exception as err:
-                    st.error(f"Segment {i} error: {err}")
-                    encrypted.append(f"[Error: {err}]")
-            output = {
-                "segments": encrypted,
-                "oaep": use_oaep,
-                "num_segments": len(segments),
-                "key_bits": n.bit_length()
-            }
-            enc_time = nowstr()
-            st.subheader("Encrypted Segments")
-            st.code(json.dumps(output, indent=2), language="json")
-            download_button_dict(output, f"⬇️ Download Encrypted Message ({enc_time})", f"rsa_encrypted_{enc_time}.json")
-        except Exception as ex:
-            st.error(f"Encryption failed: {ex}")
-
-# ---------------- PHASE 3: Decryption ----------------
-
+# PHASE 3: DECRYPTION
 elif phase == "Decryption":
     st.header("Phase 3: Decryption (Group A)")
     st.markdown("""
@@ -268,14 +271,23 @@ elif phase == "Decryption":
     st.subheader("1. Private Key")
     priv_data = upload_json_dict("Upload Private Key (.json)", key="dec_priv_upload")
     if not priv_data:
-        priv_example = '{"n": "…", "d": "…", "e": "65537"}'
-        priv_raw = st.text_area("Or paste Private Key JSON", priv_example, key="dec_priv_paste")
-        try:
-            priv_data = json.loads(priv_raw)
-        except Exception:
-            st.info("Paste your private key here if not uploading.")
-            priv_data = None
+        priv_raw = st.text_area(
+            "Or paste Private Key JSON",
+            placeholder='{"n": "<RSA modulus>", "d": "<private exponent>", "e": "65537"}',
+            key="dec_priv_paste"
+        )
+        priv_data = None
+        if priv_raw.strip() and not priv_raw.strip().startswith("{") and not priv_raw.strip().startswith("["):
+            st.info("Paste your private key JSON here if not uploading.")
+        else:
+            try:
+                if priv_raw.strip() and priv_raw.strip() not in ["", "...", '"..."']:
+                    priv_data = json.loads(priv_raw)
+            except Exception:
+                pass
 
+    n, d, e = None, None, None
+    privkey = None
     if priv_data:
         try:
             n = int(priv_data["n"])
@@ -284,48 +296,51 @@ elif phase == "Decryption":
             privkey = RSA.construct((n, e, d))
             st.success(f"Private key loaded. Key size: {n.bit_length()} bits.")
         except Exception as ex:
-            st.error(f"Invalid private key: {ex}")
-            n, d = None, None
-    else:
-        n, d = None, None
+            n, d, privkey = None, None, None
+            st.warning("Waiting for valid private key input...")
 
     st.subheader("2. Encrypted Message")
     enc_data = upload_json_dict("Upload Encrypted Message (.json)", key="dec_enc_upload")
+    segments, use_oaep = [], False
     if not enc_data:
-        enc_example = '{"segments": ["..."], "oaep": true, "num_segments": 2}'
-        enc_raw = st.text_area("Or paste Encrypted Message JSON", enc_example, key="dec_enc_paste")
-        try:
-            enc_data = json.loads(enc_raw)
-        except Exception:
-            st.info("Paste the encrypted message here if not uploading.")
-            enc_data = None
+        enc_raw = st.text_area(
+            "Or paste Encrypted Message JSON",
+            placeholder='{"segments": ["base64_or_integer_ciphertexts_here"], "oaep": true, "num_segments": 2}',
+            key="dec_enc_paste"
+        )
+        if enc_raw.strip() and not enc_raw.strip().startswith("{") and not enc_raw.strip().startswith("["):
+            st.info("Paste the encrypted message JSON here if not uploading.")
+        else:
+            try:
+                if enc_raw.strip() and enc_raw.strip() not in ["", "...", '"..."']:
+                    enc_data = json.loads(enc_raw)
+            except Exception:
+                enc_data = None
 
     if enc_data:
         segments = enc_data.get("segments", [])
         use_oaep = enc_data.get("oaep", False)
         st.info(f"{len(segments)} encrypted segment(s) loaded. OAEP: {'yes' if use_oaep else 'no'}.")
-    else:
-        segments, use_oaep = [], False
 
     decrypt_clicked = st.button("🔓 Decrypt Message")
-    if decrypt_clicked and not (n and d):
-        st.error("Please provide a valid private key before decrypting.")
-
-    if decrypt_clicked and n and d and segments:
-        decrypted, errors = [], 0
-        for i, ct in enumerate(segments, 1):
-            pt = decrypt_segment(ct, n, d, use_oaep=use_oaep)
-            if pt.startswith("[Decryption error"):
-                errors += 1
-                st.error(f"Segment {i} error: {pt}")
-            else:
-                st.success(f"Segment {i} OK.")
-            decrypted.append(pt)
-        st.subheader("Decrypted Message")
-        final = "".join([pt for pt in decrypted if not pt.startswith("[Decryption error")])
-        st.code(final, language="text")
-        if errors:
-            st.warning(f"{errors} segment(s) failed to decrypt.")
+    if decrypt_clicked:
+        if not (privkey and segments):
+            st.error("Please provide a valid private key and encrypted message before decrypting.")
+        else:
+            decrypted, errors = [], 0
+            for i, ct in enumerate(segments, 1):
+                pt = decrypt_segment(ct, n, d, use_oaep=use_oaep)
+                if pt.startswith("[Decryption error"):
+                    errors += 1
+                    st.error(f"Segment {i} error: {pt}")
+                else:
+                    st.success(f"Segment {i} OK.")
+                decrypted.append(pt)
+            st.subheader("Decrypted Message")
+            final = "".join([pt for pt in decrypted if not pt.startswith("[Decryption error")])
+            st.code(final, language="text")
+            if errors:
+                st.warning(f"{errors} segment(s) failed to decrypt.")
 
 st.markdown("""
 <hr>
