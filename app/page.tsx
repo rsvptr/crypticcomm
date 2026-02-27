@@ -50,7 +50,7 @@ function Header() {
               Wallet
             </button>
             <a 
-              href="https://github.com" 
+              href="https://github.com/rsvptr/crypticcomm/" 
               target="_blank" 
               className="p-2 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white"
             >
