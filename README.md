@@ -25,7 +25,7 @@ Your keys never leave your device. There are no servers processing your math, no
 
 Try CrypticComm instantly, with **no install needed**:
 
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://crypticcomm.streamlit.app)
+[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://crypticcomm.vercel.app/)
 
 ---
 
