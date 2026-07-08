@@ -1,129 +1,54 @@
 <div align="center">
-  <img src="./assets/logo.png" alt="CrypticComm logo" width="120" />
+  <img src="./assets/logo.png" alt="CrypticComm logo" width="110" />
   <h1>CrypticComm</h1>
-  <p><strong>A browser-first RSA cryptography workspace for learning, experimenting, and testing secure messaging flows without a custom backend.</strong></p>
-  <p><em>Built with Next.js, React, Tailwind CSS, Framer Motion, the Web Crypto API, and PeerJS.</em></p>
-
-  <p>
-    <img src="https://img.shields.io/badge/Next.js-14.2.35-111111?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js badge" />
-    <img src="https://img.shields.io/badge/React-18-1f2937?style=for-the-badge&logo=react&logoColor=61dafb" alt="React badge" />
-    <img src="https://img.shields.io/badge/Tailwind_CSS-3.4-0f172a?style=for-the-badge&logo=tailwindcss&logoColor=38bdf8" alt="Tailwind badge" />
-    <img src="https://img.shields.io/badge/Web_Crypto-Local_Only-0b1220?style=for-the-badge" alt="Web Crypto badge" />
-    <img src="https://img.shields.io/badge/Vercel-Ready-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel badge" />
-  </p>
+  <p><strong>An RSA workspace that runs entirely in your browser.</strong></p>
+  <p>Generate keys, encrypt and decrypt messages, sign and verify, store identities in an encrypted wallet, and chat with another browser over WebRTC. Built with Next.js, React, Tailwind CSS, the Web Crypto API, and PeerJS.</p>
+  <p><a href="https://crypticcomm.vercel.app">crypticcomm.vercel.app</a></p>
 </div>
 
-> **Project note**
->
-> CrypticComm is an educational cryptography application, not a formally audited security product. It uses standard browser cryptography primitives and keeps sensitive work local where possible, but it should still be treated as a teaching and experimentation tool rather than a production secure messaging platform.
+> **Note:** CrypticComm started as university coursework. It uses standard browser cryptography and keeps keys local, but it has never been audited. Treat it as a teaching tool, not a secure messaging product.
 
----
+## Where it started
 
-CrypticComm brings the main RSA learning workflows into one focused workspace.
+CrypticComm is a much-expanded version of a SageMath program written for a group project in MA6011, Cryptographic Mathematics. The assignment paired up groups and had them run RSA by hand, in phases. Group A generated a key pair whose primes p and q were 300-digit numbers, spaced far enough apart that Fermat's factorization method would get nowhere, with seeded random generation so the lecturer could reproduce every value. Group B took about a thousand words of English literature, split them into ten segments, turned each segment into a large integer using a text encoding both groups had agreed on beforehand, and encrypted the lot with Group A's public key. Group A decrypted the segments and sent the recovered text back, and the whole thing was submitted as a single documented Sage script.
 
-Instead of bouncing between a key generator, a PEM converter, a signing demo, a decryption scratchpad, and a separate chat experiment, the app keeps the full lifecycle in one tabbed interface. The goal is to make public-key cryptography easier to understand, easier to demonstrate, and easier to test in practice.
+This app is that workflow rebuilt as an interactive tool. The agreed text-to-integer dictionary became `textToBigInt` and `bigIntToText`, the ten blocks became the segmentation engine, the raw m^e mod n arithmetic survives as textbook mode, and the email exchange between groups became the peer chat. Around that core it adds the things the assignment deliberately left out, which is where the real lessons start: proper padding (OAEP), signatures (RSA-PSS), key fingerprints, integrity checks, and an encrypted key wallet.
 
-## Table of Contents
+## Why it exists
 
-- [At a Glance](#at-a-glance)
-- [What the App Covers](#what-the-app-covers)
-- [Feature Map](#feature-map)
-- [How the App Fits Together](#how-the-app-fits-together)
-- [Architecture](#architecture)
-- [Security and Trust Model](#security-and-trust-model)
-- [Tech Stack](#tech-stack)
-- [Workspace Tabs and User Flows](#workspace-tabs-and-user-flows)
-- [Getting Started](#getting-started)
-- [Environment Variables](#environment-variables)
-- [Available Scripts](#available-scripts)
-- [Deployment on Vercel](#deployment-on-vercel)
-- [Project Structure](#project-structure)
-- [Implementation Notes](#implementation-notes)
-- [Verification](#verification)
-- [Current Limitations](#current-limitations)
+Learning RSA usually means bouncing between a key generator here, a PEM converter there, and a signing demo somewhere else, losing the thread at each hop. CrypticComm puts the whole lifecycle in one place: create a key, encrypt with it, decrypt, sign, verify, then use the same key to chat with a second browser. Each step feeds the next, which makes the concepts much easier to hold onto.
 
----
+## The tools
 
-## At a Glance
-
-| Area | Summary |
+| Tab | What it does |
 | --- | --- |
-| Purpose | A browser-native RSA learning and experimentation workspace |
-| App shape | Single-page tabbed interface with focused tool views |
-| Frontend | Next.js App Router with React 18 |
-| Crypto engine | Web Crypto API plus `BigInt` helpers for textbook RSA demos |
-| Local persistence | AES-GCM encrypted wallet stored in `localStorage` |
-| Session persistence | Ephemeral in-memory history for the current browser session |
-| Networking | PeerJS for signaling and WebRTC data channels for direct peer chat |
-| Backend | No custom API or database in the current build |
-| Deployment target | Vercel |
+| Keys | Generates 1024/2048/4096-bit RSA pairs with JSON and PEM export, plus a key fingerprint |
+| Encrypt | Encrypts text with a public key (OAEP or raw textbook RSA), with a live byte and segment estimate |
+| Decrypt | Rebuilds plaintext, shows per-segment results, and checks the payload's embedded SHA-256 |
+| Sign | Creates RSA-PSS (SHA-256) signatures as hex |
+| Verify | Checks a signature against a message and public key |
+| Peer chat | Connects two browsers through PeerJS; messages are RSA-encrypted, and each bubble can show its ciphertext |
+| History | Session-only log of what you did, gone on refresh |
+| Wallet | Header modal that stores identities encrypted in localStorage, with import for exported keys |
 
-## What the App Covers
+The tools feed each other. An encrypted payload has an "Open in Decrypt" button, a fresh signature has "Check in Verify", and the chat session keeps running while you work in other tabs, with an unread counter on the tab.
 
-CrypticComm includes:
+Textbook RSA is included on purpose. Seeing that the same plaintext always encrypts to the same ciphertext, then switching to OAEP and watching that stop, teaches more about padding than any paragraph could.
 
-- RSA key generation in the browser
-- JSON and PEM-based key import and export
-- OAEP encryption and decryption
-- textbook RSA for demonstration purposes
-- RSA-PSS signing and verification
-- a local encrypted wallet for saved identities
-- session-only history tracking
-- encrypted peer-to-peer chat over WebRTC
-
-That mix is intentional. The app is designed to help someone move from key creation to encryption to verification to peer messaging without losing context halfway through.
-
-## Feature Map
-
-| Area | Workspace tab | What it does | Why it matters |
-| --- | --- | --- | --- |
-| Home | `Home` | Introduces the platform and links users into the main workflows | Gives the app a clear front door |
-| Identity generation | `KeyGen` | Creates RSA key pairs locally and supports JSON or PEM export plus wallet save | Starts most workflows cleanly |
-| Encryption | `Encrypt` | Encrypts plaintext with OAEP or textbook RSA and emits segmented JSON payloads | Makes RSA message flow tangible |
-| Decryption | `Decrypt` | Reassembles and decrypts payload segments using the matching private key | Lets users inspect recovery and failure cases |
-| Signatures | `Sign` | Produces RSA-PSS signatures from a private key | Demonstrates authenticity without encryption |
-| Verification | `Verify` | Checks whether a signature matches a given message and public key | Reinforces integrity and authorship concepts |
-| Wallet | Header modal | Stores identities locally in an encrypted browser vault | Avoids constant copy-paste between tools |
-| Network | `Network` | Exchanges peer IDs and public keys, then sends encrypted chat messages | Extends the learning flow into direct messaging |
-| Session review | `History` | Shows recent encrypt, decrypt, sign, and verify events for the current session | Helps users review what they just did |
-
-## How the App Fits Together
-
-```mermaid
-flowchart TD
-    A["User"] --> B["Next.js workspace shell"]
-    B --> C["Focused tool tabs"]
-    C --> D["Web Crypto API"]
-    C --> E["Encrypted wallet in localStorage"]
-    C --> F["Session history in React state"]
-    C --> G["PeerJS signaling"]
-    G --> H["WebRTC data channel"]
-    H --> I["Remote browser peer"]
-    D --> C
-    E --> C
-    F --> C
-```
-
-The key design decision is that CrypticComm does not behave like a generic crypto playground page with everything stacked vertically. Each task lives in its own view, but the app still shares one persistent workspace shell, one wallet, and one session context.
-
-## Architecture
-
-### High-level view
+## How it fits together
 
 ```mermaid
 flowchart LR
     subgraph Browser
-        A1["App Router shell"]
-        A2["Client tool components"]
-        A3["Toast and history context"]
-        A4["Wallet context"]
+        A1["App shell and tool tabs"]
+        A2["Toast + history context"]
+        A3["Wallet context"]
     end
 
     subgraph Crypto and storage
         B1["Web Crypto API"]
-        B2["BigInt helpers"]
-        B3["AES-GCM wallet payload"]
-        B4["localStorage"]
+        B2["BigInt helpers (textbook mode)"]
+        B3["AES-GCM wallet blob in localStorage"]
     end
 
     subgraph Networking
@@ -133,359 +58,132 @@ flowchart LR
     end
 
     A1 --> A2
-    A2 --> A3
-    A2 --> A4
-    A2 --> B1
-    A2 --> B2
-    A4 --> B3
-    B3 --> B4
-    A2 --> C1
+    A1 --> A3
+    A1 --> B1
+    A1 --> B2
+    A3 --> B3
+    A1 --> C1
     C1 --> C2
     C2 --> C3
 ```
 
-### Design choices
+There is no custom backend. The only server involved is the public PeerJS signaling server, which helps two browsers find each other; the chat messages themselves travel peer to peer, encrypted with the recipient's public key before they leave the sender.
 
-| Choice | Why it matters |
-| --- | --- |
-| Single-page tabbed workspace | Keeps the app easy to navigate while still separating each cryptographic task |
-| Browser-only cryptography | Private keys and plaintext do not need a custom server round trip |
-| Wallet encryption with PBKDF2 + AES-GCM | Saved identities are protected at rest in local browser storage |
-| Session-only history | Recent actions are reviewable without creating long-term sensitive logs |
-| PeerJS plus WebRTC | The network tab can demonstrate real peer messaging without building a custom signaling backend |
-| Shared UI primitives | Cards, buttons, empty states, and tool layouts stay visually consistent |
+## Security model
 
-## Security and Trust Model
-
-| Area | Current behaviour |
-| --- | --- |
-| Key generation | RSA key pairs are generated in the browser with the Web Crypto API |
-| Encryption and signatures | OAEP and RSA-PSS operations execute locally in browser memory |
-| Wallet storage | Saved identities are encrypted with AES-GCM using a PBKDF2-derived key |
-| Session history | History is stored only in React state and disappears on refresh or close |
-| Peer chat messages | Outgoing messages are RSA-encrypted before being sent over WebRTC |
-| Peer signaling | PeerJS still uses a signaling layer to help browsers find each other |
-| Production readiness | The app is educational and proof-of-concept oriented, not formally audited |
-
-### Wallet and peer flow
+- Key pairs are generated in the browser with the Web Crypto API and never uploaded.
+- OAEP encryption, RSA-PSS signing, and verification all run locally.
+- The wallet encrypts identities with AES-GCM before writing to localStorage. The key is derived from your master password with PBKDF2-SHA256 at 600,000 iterations, in line with current OWASP guidance. Each payload records its own KDF parameters, so the work factor can be raised later without stranding old wallets; wallets created before this scheme are re-encrypted at the current strength the next time they are unlocked. Forget the password and the data is gone; there is no recovery path.
+- Imported keys are validated before they enter the wallet, including a check that p times q actually equals the modulus.
+- Every key gets a short SHA-256 fingerprint. Peer chat shows yours and your peer's side by side; reading them to each other over a call is the standard defence against a swapped key at the signaling server.
+- Encrypted payloads carry the SHA-256 of the original message, and Decrypt compares it against what it recovered.
+- History lives in React state only and resets with the page.
+- Peer discovery goes through PeerJS signaling, so using the chat is not the same as being fully offline.
+- Locking the wallet ends any live chat session, since the identity it was using leaves memory.
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant App as CrypticComm
-    participant Crypto as Web Crypto API
     participant Store as localStorage
-    participant Peer as PeerJS and WebRTC
+    participant Peer as PeerJS / WebRTC
     participant Remote as Remote user
 
     U->>App: Create or unlock wallet
-    App->>Crypto: Derive AES key with PBKDF2
-    Crypto-->>App: Wallet key
-    App->>Store: Encrypt or decrypt identities with AES-GCM
+    App->>Store: Read or write AES-GCM encrypted identities
 
-    U->>App: Select identity in Network tab
-    App->>Peer: Create peer node
+    U->>App: Start peer node
     Peer-->>App: Local peer ID
-    App->>Remote: Share peer ID manually
-    Remote-->>App: Connect and exchange public key
+    U->>Remote: Share peer ID (out of band)
+    Remote-->>App: Connect, public keys exchanged automatically
 
     U->>App: Send chat message
-    App->>Crypto: Encrypt message with remote public key
-    Crypto-->>App: Encrypted segments
-    App->>Peer: Send encrypted payload
+    App->>App: Encrypt with remote public key
+    App->>Peer: Send encrypted segments
     Peer-->>Remote: Deliver over WebRTC
 ```
 
-## Tech Stack
+## Design
 
-| Category | Technology | Purpose |
-| --- | --- | --- |
-| Framework | Next.js 14.2.35 | App shell, routing, build pipeline, deployment readiness |
-| UI | React 18 | Component model and client-side interactivity |
-| Styling | Tailwind CSS 3.4 | Layout, tokens, spacing, and responsive styling |
-| Motion | Framer Motion | Enter transitions, tab changes, and UI polish |
-| Cryptography | Web Crypto API | RSA-OAEP, RSA-PSS, PBKDF2, AES-GCM |
-| Math helpers | Native `BigInt` | Textbook RSA demonstration mode |
-| Networking | PeerJS | WebRTC signaling and peer connection abstraction |
-| Icons | Lucide React | Consistent SVG iconography |
-| Utility libraries | `clsx`, `tailwind-merge` | Class composition and UI utility cleanup |
+The interface is a single dark theme built around one accent color taken from the logo. Type is set in Geist and Geist Mono (key material, hashes, and stats are always mono). Navigation is a tab bar with full keyboard support: arrow keys move between tools, and the bar scrolls horizontally on phones. Inputs stay at 16px on small screens so iOS doesn't zoom on focus, and every tool stacks into a single column on mobile.
 
-## Workspace Tabs and User Flows
+## Getting started
 
-### 1. Home
-
-The Home tab acts as the landing view for the current shell. It gives users:
-
-- a quick explanation of what the app is for
-- a cleaner first impression than dropping directly into a crypto form
-- direct jump points into key generation and peer networking
-
-### 2. KeyGen
-
-The KeyGen flow supports:
-
-- 1024-bit keys for fast demos
-- 2048-bit keys for standard use
-- 4096-bit keys for heavier experiments
-- JSON and PEM export
-- wallet save for later reuse
-
-The generated identity name is deterministic, which makes repeated demos easier to follow.
-
-### 3. Encrypt
-
-The Encrypt tab is designed around a simple sequence:
-
-1. load a public key
-2. enter plaintext
-3. choose OAEP or textbook RSA
-4. export the resulting segmented payload
-
-This makes the difference between secure padding and raw RSA much easier to see.
-
-### 4. Decrypt
-
-The Decrypt tab reverses that flow and reports:
-
-- recovered plaintext
-- per-run status
-- segment failure count
-- output hash
-
-It also supports plaintext export so the end of the workflow feels complete.
-
-### 5. Sign
-
-The signing workflow is intentionally focused:
-
-- load a private key
-- enter the exact message
-- generate an RSA-PSS signature
-- copy or download the resulting hex output
-
-### 6. Verify
-
-The verification workflow checks three things together:
-
-- the signer public key
-- the original message
-- the signature
-
-The result panel is intentionally simple and decisive so it is easy to demo in a classroom or report context.
-
-### 7. Network
-
-The network tab demonstrates a real peer messaging flow:
-
-- choose an identity from the wallet
-- initialize a local node
-- share your peer ID manually
-- connect to another browser
-- exchange public keys automatically
-- send encrypted chat messages
-
-This part of the app is especially useful for showing how key exchange and encrypted transport relate to each other.
-
-### 8. History
-
-History is session-only by design. It helps users review recent actions without creating a persistent log of sensitive material.
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 20 or newer is recommended
-- npm
-
-### 1. Install dependencies
+The hosted copy at [crypticcomm.vercel.app](https://crypticcomm.vercel.app) is the quickest way in. To run it locally you'll need Node.js 20 or newer.
 
 ```bash
 npm install
-```
-
-### 2. Start the development server
-
-```bash
 npm run dev
 ```
 
 Then open [http://localhost:3000](http://localhost:3000).
 
-### 3. Suggested first run
+A good first run:
 
-1. Open `KeyGen` and generate a 2048-bit identity.
-2. Save it to the browser wallet.
-3. Use `Encrypt` and `Decrypt` to test the roundtrip.
-4. Use `Sign` and `Verify` to test the signature flow.
-5. Open `Network` in two browser windows if you want to try the peer chat workflow.
+1. Generate a 2048-bit key in the Keys tab and save it to the wallet.
+2. Encrypt a message with it, then follow the payload into Decrypt with one click.
+3. Sign a message, check it in Verify, then change one character and check again.
+4. Open Peer chat in two browser windows, swap peer IDs, and compare the key fingerprints before you trust the channel.
 
-## Environment Variables
+No environment variables are needed.
 
-This project currently requires no environment variables for normal local development.
-
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| None | No | The current build is fully client-driven |
-
-### Important note about networking
-
-The `Network` tab relies on PeerJS signaling to establish WebRTC connections between browsers. Cryptographic work still happens locally, but peer discovery is not the same thing as operating fully offline.
-
-## Available Scripts
+## Scripts
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | Starts the local development server |
+| `npm run dev` | Starts the development server |
 | `npm run build` | Creates a production build |
-| `npm run start` | Runs the production server |
-| `npm run lint` | Runs ESLint across the project |
+| `npm run start` | Serves the production build |
+| `npm run lint` | Runs ESLint |
+| `npm test` | Runs the unit tests (Vitest) |
 
-## Deployment on Vercel
+`npm run lint`, `npm run build`, and `npm test` all pass on the current code. The tests
+cover the crypto helpers end to end: OAEP and textbook round trips, tamper cases,
+RSA-PSS sign and verify, key parsing, segmentation, wallet encryption, and
+fingerprints, running against Node's built-in WebCrypto.
 
-CrypticComm is structured to deploy cleanly on Vercel.
+## Deployment
 
-### Basic deployment steps
+The app deploys to Vercel without configuration: push the repository, import it, deploy. That is exactly how [crypticcomm.vercel.app](https://crypticcomm.vercel.app) is hosted. It builds to static client pages, so there is no database or API to set up. Next.js will suggest installing `sharp` for image optimization in production; the build works without it.
 
-1. Push the repository to a Git provider.
-2. Import the project into Vercel.
-3. Deploy.
-
-### Deployment notes
-
-- No database or external API configuration is required for the current version.
-- The app is mostly static client UI with browser-side logic.
-- The optional network workflow still depends on live browser-to-browser connectivity.
-- Next.js may recommend installing `sharp` for production image optimization, but the app can build without it.
-
-## Project Structure
+## Project structure
 
 ```text
-crypticcomm-main/
-+-- app/
-|   +-- layout.tsx
-|   \-- page.tsx
-+-- assets/
-|   +-- favicon.png
-|   \-- logo.png
-+-- components/
-|   +-- Decrypt.tsx
-|   +-- Encrypt.tsx
-|   +-- HistoryContext.tsx
-|   +-- HistoryTab.tsx
-|   +-- HomeTab.tsx
-|   +-- KeyGen.tsx
-|   +-- Network.tsx
-|   +-- Sign.tsx
-|   +-- ToastContext.tsx
-|   +-- Verify.tsx
-|   +-- WalletContext.tsx
-|   +-- WalletModal.tsx
-|   \-- ui/
-|       \-- Motion.tsx
-+-- lib/
-|   \-- rsa.ts
-+-- styles/
-|   \-- globals.css
-+-- next.config.mjs
-+-- package.json
-\-- README.md
+crypticcomm/
+├── app/
+│   ├── layout.tsx        Fonts, metadata, document shell
+│   └── page.tsx          App shell: header, tab bar, panels, footer
+├── components/
+│   ├── HomeTab.tsx       Landing view and tool directory
+│   ├── KeyGen.tsx        Key generation
+│   ├── Encrypt.tsx       Encryption
+│   ├── Decrypt.tsx       Decryption
+│   ├── Sign.tsx          RSA-PSS signing
+│   ├── Verify.tsx        Signature verification
+│   ├── Network.tsx       Peer chat view (fingerprints, ciphertext inspection)
+│   ├── NetworkContext.tsx App-wide PeerJS session, so chat survives tab switches
+│   ├── WorkbenchContext.tsx Tab state and cross-tool handoffs
+│   ├── HistoryTab.tsx    Session history list
+│   ├── WalletModal.tsx   Create, unlock, import, and manage the wallet
+│   ├── WalletContext.tsx Encrypted wallet state
+│   ├── HistoryContext.tsx / ToastContext.tsx
+│   └── ui/               Shared primitives (buttons, cards, key pickers, motion)
+├── lib/
+│   ├── rsa.ts            Crypto helpers: keygen, OAEP, PSS, PEM, wallet encryption
+│   ├── rsa.test.ts       Unit tests for everything above
+│   └── download.ts       File download helpers
+└── styles/globals.css    Design tokens and component classes
 ```
 
-### Quick file guide
+## Known limitations
 
-| File | Role |
-| --- | --- |
-| `app/page.tsx` | Main workspace shell, tab navigation, and top-level providers |
-| `app/layout.tsx` | Global metadata, font setup, favicon wiring, and document shell |
-| `lib/rsa.ts` | Core RSA helpers, PEM conversion, signature logic, and wallet encryption |
-| `components/WalletContext.tsx` | Encrypted wallet state and persistence layer |
-| `components/Network.tsx` | Peer setup and encrypted chat workflow |
-| `components/HistoryContext.tsx` | Session-only action history |
-| `components/ui/Motion.tsx` | Shared UI primitives such as cards, buttons, and file upload controls |
+- No accounts, no server-side storage, and no message history across sessions. This is deliberate.
+- The wallet is only as strong as its master password, and localStorage is not hardware-backed storage.
+- Textbook mode is insecure by design; it exists to be broken in demonstrations.
+- Peer chat needs both browsers online at the same time and can be blocked by strict NATs or firewalls.
+- The chat supports one conversation at a time; extra incoming connections are refused while a session is active.
+- Unit tests cover the crypto library; the UI itself is still verified manually.
 
-## Implementation Notes
+## License
 
-### Encryption modes
-
-CrypticComm intentionally supports two modes:
-
-- OAEP, which is the secure default
-- textbook RSA, which is unsafe but useful for demonstration
-
-That second mode is there to teach, not to recommend.
-
-### Wallet handling
-
-The wallet:
-
-- stores identities only after explicit save
-- encrypts them before writing to `localStorage`
-- keeps decrypted identities in memory only while the wallet is unlocked
-
-### Session history
-
-History is intentionally lightweight:
-
-- it records recent action summaries
-- it truncates oversized message and output fields
-- it resets with the session
-
-### UI design direction
-
-The current build uses:
-
-- a dedicated Home tab for orientation
-- persistent tool navigation
-- more consistent button sizing
-- cleaner composer and output panels
-- shared empty states and action cards across the toolset
-
-## Verification
-
-The current codebase has been checked with:
-
-```bash
-npm run lint
-npm run build
-```
-
-Both commands pass on the current project.
-
-The app was also checked locally with:
-
-- successful `next dev` startup
-- HTTP `200` response from the root route
-- expected workspace markers present in the served HTML
-- RSA roundtrip verification for key generation, OAEP encrypt/decrypt, RSA-PSS sign/verify, and wallet encrypt/decrypt
-
-### Manual smoke test
-
-If you want to validate the app yourself in a few minutes:
-
-1. Generate a key in `KeyGen`.
-2. Save it to the wallet.
-3. Encrypt a message with the public key.
-4. Decrypt it with the private key.
-5. Sign a message.
-6. Verify the signature with the public key.
-7. Open `Network` in two browser windows and exchange peer IDs.
-
-## Current Limitations
-
-The current build does not include:
-
-- user accounts
-- shared multi-user history
-- server-side storage
-- formal cryptographic auditing
-- automated two-peer browser testing in the repository itself
-
-That is intentional for this version. The app is designed to stay simple, local-first, and easy to understand.
-
-## Closing Note
-
-CrypticComm is meant to make public-key cryptography feel less abstract.
-
-It should help someone generate a key, inspect a payload, understand why signatures matter, and test a browser-to-browser encrypted message flow without needing a heavyweight backend or a pile of disconnected tools.
-
-That is the standard this version was built around.
+MIT. See [LICENSE](./LICENSE).

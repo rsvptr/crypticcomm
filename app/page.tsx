@@ -1,17 +1,16 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import {
-  CheckCircle2,
   Clock,
   Github,
   Home as HomeIcon,
   KeyRound,
   Lock,
-  Network,
+  MessageSquare,
   PenTool,
   ShieldCheck,
   Unlock,
@@ -29,380 +28,310 @@ import HistoryTab from "@/components/HistoryTab";
 import WalletModal from "@/components/WalletModal";
 import { HistoryProvider } from "@/components/HistoryContext";
 import { ToastProvider } from "@/components/ToastContext";
-import { Card, NeonButton } from "@/components/ui/Motion";
 import { WalletProvider, useWallet } from "@/components/WalletContext";
+import { NetworkProvider, useNetwork } from "@/components/NetworkContext";
+import { TabId, WorkbenchProvider, useWorkbench } from "@/components/WorkbenchContext";
 
-const TABS = [
+const TABS: ReadonlyArray<{
+  id: TabId;
+  label: string;
+  icon: typeof HomeIcon;
+  title: string;
+  description: string;
+}> = [
   {
     id: "home",
     label: "Home",
     icon: HomeIcon,
-    eyebrow: "Start",
-    description: "Get the lay of the land, then jump into a focused cryptography workflow.",
+    title: "",
+    description: "",
   },
   {
     id: "keygen",
-    label: "KeyGen",
+    label: "Keys",
     icon: KeyRound,
-    eyebrow: "Create",
-    description: "Generate browser-only RSA identities with export-ready PEM and JSON output.",
+    title: "Key generation",
+    description:
+      "Create an RSA key pair in your browser, then export it or save it to the wallet.",
   },
   {
     id: "encrypt",
     label: "Encrypt",
     icon: Lock,
-    eyebrow: "Protect",
-    description: "Encrypt plain text with OAEP or textbook RSA and export the segmented payload.",
+    title: "Encrypt a message",
+    description: "Encrypt text with the recipient's public key, using OAEP or textbook RSA.",
   },
   {
     id: "decrypt",
     label: "Decrypt",
     icon: Unlock,
-    eyebrow: "Recover",
-    description: "Decrypt payloads, inspect segment health, and copy the recovered plaintext.",
+    title: "Decrypt a payload",
+    description: "Recover the plaintext from an encrypted payload with the matching private key.",
   },
   {
     id: "sign",
     label: "Sign",
     icon: PenTool,
-    eyebrow: "Prove",
-    description: "Create RSA-PSS signatures to prove authorship without exposing your private key.",
+    title: "Sign a message",
+    description: "Produce an RSA-PSS signature that ties a message to your private key.",
   },
   {
     id: "verify",
     label: "Verify",
     icon: ShieldCheck,
-    eyebrow: "Validate",
-    description: "Confirm message integrity with public-key verification and instant status feedback.",
+    title: "Verify a signature",
+    description:
+      "Check a signature against the original message and the signer's public key.",
   },
   {
     id: "network",
-    label: "Network",
-    icon: Network,
-    eyebrow: "Connect",
-    description: "Exchange public keys automatically and send encrypted messages over WebRTC.",
+    label: "Peer chat",
+    icon: MessageSquare,
+    title: "Peer chat",
+    description: "Connect two browsers over WebRTC and exchange RSA-encrypted messages.",
   },
   {
     id: "history",
     label: "History",
     icon: Clock,
-    eyebrow: "Review",
-    description: "Track this session's cryptographic actions without persisting sensitive activity.",
+    title: "Session history",
+    description: "What you've done this session. Nothing here survives a refresh.",
   },
-] as const;
+];
 
-function Header() {
+function WalletButton() {
   const { hasWallet, isLocked, keys } = useWallet();
   const [showWallet, setShowWallet] = useState(false);
 
+  const label = !hasWallet
+    ? "Set up wallet"
+    : isLocked
+      ? "Unlock wallet"
+      : `Wallet (${keys.length})`;
+
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[rgba(5,8,20,0.76)] backdrop-blur-2xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-white/10 shadow-[0_18px_40px_rgba(67,97,238,0.24)]">
-              <Image
-                src={favicon}
-                alt="CrypticComm icon"
-                className="h-8 w-8 object-contain"
-                priority
-              />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                Privacy-first RSA Lab
-              </p>
-              <h1 className="truncate text-lg font-semibold tracking-tight text-white sm:text-xl">
-                CrypticComm
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 text-sm font-medium text-slate-200 sm:inline-flex">
-              <CheckCircle2
-                className={`h-4 w-4 ${isLocked ? "text-amber-300" : "text-emerald-400"}`}
-              />
-              {hasWallet
-                ? isLocked
-                  ? "Wallet locked"
-                  : `${keys.length} saved identit${keys.length === 1 ? "y" : "ies"}`
-                : "No wallet yet"}
-            </div>
-
-            <NeonButton
-              variant="secondary"
-              size="md"
-              onClick={() => setShowWallet(true)}
-              className="min-w-[168px] px-4"
-            >
-              {isLocked ? (
-                <Lock className="h-4 w-4 text-rose-300" />
-              ) : (
-                <Vault className="h-4 w-4 text-emerald-300" />
-              )}
-              <span>{isLocked ? "Open Wallet" : "Wallet Ready"}</span>
-            </NeonButton>
-
-            <a
-              href="https://github.com/rsvptr/crypticcomm/"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Open CrypticComm repository on GitHub"
-              className="icon-btn shrink-0"
-            >
-              <Github className="h-4 w-4" />
-            </a>
-          </div>
-        </div>
-      </header>
+      <button
+        type="button"
+        onClick={() => setShowWallet(true)}
+        className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[13px] font-medium text-zinc-200 transition-colors duration-150 hover:border-white/20 hover:bg-white/[0.08]"
+      >
+        {!hasWallet || isLocked ? (
+          <Lock className="h-3.5 w-3.5 text-zinc-500" />
+        ) : (
+          <Vault className="h-3.5 w-3.5 text-indigo-400" />
+        )}
+        {label}
+      </button>
       {showWallet && <WalletModal onClose={() => setShowWallet(false)} />}
     </>
   );
 }
 
-function ToolButton({
-  active,
-  mobile = false,
-  icon: Icon,
-  label,
-  eyebrow,
-  id,
-  controls,
-  onClick,
-}: {
-  active: boolean;
-  mobile?: boolean;
-  icon: (typeof TABS)[number]["icon"];
-  label: string;
-  eyebrow: string;
-  id: string;
-  controls: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      aria-controls={controls}
-      id={id}
-      onClick={onClick}
-      className={clsx(
-        "relative overflow-hidden border text-left transition duration-200",
-        mobile
-          ? "min-w-[152px] rounded-[22px] px-4 py-3"
-          : "flex w-full items-center gap-3 rounded-[22px] px-4 py-4",
-        active
-          ? "border-cyan-400/30 bg-cyan-400/10 text-white shadow-[0_18px_45px_rgba(34,211,238,0.12)]"
-          : "border-white/10 bg-white/5 text-slate-300 hover:border-white/20 hover:bg-white/10"
-      )}
-    >
-      {active && (
-        <motion.div
-          layoutId={mobile ? "mobile-tab-highlight" : "desktop-tab-highlight"}
-          className="absolute inset-0 bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(67,97,238,0.14),transparent)]"
-          transition={{ type: "spring", bounce: 0.18, duration: 0.5 }}
-        />
-      )}
+function TabBar() {
+  const { activeTab, selectTab } = useWorkbench();
+  const { unread } = useNetwork();
+  const tabRefs = useRef(new Map<TabId, HTMLButtonElement>());
 
+  useEffect(() => {
+    tabRefs.current.get(activeTab)?.scrollIntoView({
+      behavior: "smooth",
+      inline: "nearest",
+      block: "nearest",
+    });
+  }, [activeTab]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const currentIndex = TABS.findIndex((tab) => tab.id === activeTab);
+    let nextIndex = -1;
+
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % TABS.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = TABS.length - 1;
+    }
+
+    if (nextIndex >= 0) {
+      event.preventDefault();
+      const nextId = TABS[nextIndex].id;
+      selectTab(nextId);
+      tabRefs.current.get(nextId)?.focus();
+    }
+  };
+
+  return (
+    <div className="relative">
       <div
-        className={clsx(
-          "relative z-10 flex items-center gap-3",
-          mobile ? "flex-col items-start gap-4" : "w-full"
-        )}
+        role="tablist"
+        aria-label="CrypticComm tools"
+        onKeyDown={handleKeyDown}
+        className="nav-scroll mx-auto flex max-w-6xl items-stretch gap-1 overflow-x-auto px-2 sm:px-4"
       >
-        <div
-          className={clsx(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
-            active
-              ? "border-cyan-300/30 bg-white/10 text-cyan-100"
-              : "border-white/10 bg-white/5 text-slate-300"
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-            {eyebrow}
-          </p>
-          <p className="mt-1 text-base font-semibold tracking-tight">{label}</p>
-        </div>
+        {TABS.map((tab) => {
+          const active = activeTab === tab.id;
+          const Icon = tab.icon;
+          const showUnread = tab.id === "network" && unread > 0 && !active;
+          return (
+            <button
+              key={tab.id}
+              ref={(node) => {
+                if (node) {
+                  tabRefs.current.set(tab.id, node);
+                } else {
+                  tabRefs.current.delete(tab.id);
+                }
+              }}
+              type="button"
+              role="tab"
+              id={`tab-${tab.id}`}
+              aria-selected={active}
+              aria-controls={`panel-${tab.id}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => selectTab(tab.id)}
+              className={clsx(
+                "relative flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm transition-colors duration-150",
+                active ? "text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {tab.label}
+              {showUnread && (
+                <span
+                  aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
+                  className="ml-0.5 inline-flex h-4 min-w-4 animate-pop items-center justify-center rounded-md bg-indigo-500 px-1 font-mono text-[10px] font-semibold leading-none text-white"
+                >
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              )}
+              {active && (
+                <motion.div
+                  layoutId="tab-underline"
+                  className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-indigo-400"
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.45 }}
+                />
+              )}
+            </button>
+          );
+        })}
       </div>
-    </button>
+      {/* Edge fade hints that the tab row scrolls on narrow screens. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-[#0a0a0e] to-transparent sm:hidden"
+      />
+    </div>
   );
 }
 
 function HomeContent() {
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["id"]>("home");
-
-  useEffect(() => {
-    const savedTab = window.localStorage.getItem("crypticcomm-active-tab");
-    if (savedTab && TABS.some((tab) => tab.id === savedTab)) {
-      setActiveTab(savedTab as (typeof TABS)[number]["id"]);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("crypticcomm-active-tab", activeTab);
-  }, [activeTab]);
-
-  const activeTabMeta = useMemo(
-    () => TABS.find((tab) => tab.id === activeTab) ?? TABS[0],
-    [activeTab]
-  );
-  const ActiveTabIcon = activeTabMeta.icon;
+  const { activeTab, selectTab } = useWorkbench();
+  const activeTabMeta = TABS.find((tab) => tab.id === activeTab) ?? TABS[0];
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden">
-      <Header />
+    <div className="flex min-h-dvh flex-col">
+      <a
+        href="#content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-indigo-600 focus:px-3 focus:py-2 focus:text-sm focus:text-white"
+      >
+        Skip to content
+      </a>
 
-      <div className="lg:hidden sticky top-[81px] z-40 border-b border-white/10 bg-[rgba(5,8,20,0.84)] px-4 py-3 backdrop-blur-2xl sm:px-6">
-        <div
-          role="tablist"
-          aria-label="CrypticComm tools"
-          className="nav-scroll flex gap-3 overflow-x-auto pb-1"
-        >
-          {TABS.map((tab) => (
-            <ToolButton
-              key={tab.id}
-              active={activeTab === tab.id}
-              mobile
-              icon={tab.icon}
-              label={tab.label}
-              eyebrow={tab.eyebrow}
-              id={`mobile-tab-${tab.id}`}
-              controls={`panel-${tab.id}`}
-              onClick={() => setActiveTab(tab.id)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="relative z-10 mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
-        <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
-          <aside className="hidden lg:block">
-            <div className="sticky top-[98px] space-y-4">
-              <Card className="p-3">
-                <div className="px-3 pb-3 pt-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                    Workspace
-                  </p>
-                  <h2 className="mt-2 text-xl font-semibold tracking-tight text-white">
-                    Jump between tools
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Navigation stays pinned while you work, and Home gives you a clean starting
-                    point instead of dropping straight into a tool.
-                  </p>
-                </div>
-
-                <div role="tablist" aria-label="CrypticComm tools" className="space-y-2">
-                  {TABS.map((tab) => (
-                    <ToolButton
-                      key={tab.id}
-                      active={activeTab === tab.id}
-                      icon={tab.icon}
-                      label={tab.label}
-                      eyebrow={tab.eyebrow}
-                      id={`desktop-tab-${tab.id}`}
-                      controls={`panel-${tab.id}`}
-                      onClick={() => setActiveTab(tab.id)}
-                    />
-                  ))}
-                </div>
-              </Card>
-            </div>
-          </aside>
-
-          <div className="space-y-5">
-            <Card className="px-5 py-5 sm:px-6">
-              <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-cyan-400/20 bg-cyan-400/10 text-cyan-100">
-                    <ActiveTabIcon className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                      Current tool
-                    </p>
-                    <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-                      {activeTabMeta.label}
-                    </h2>
-                    <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
-                      {activeTabMeta.description}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 xl:w-[360px]">
-                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                      Navigation
-                    </p>
-                    <p className="mt-2 text-sm font-medium leading-6 text-slate-100">
-                      Tabs stay visible while you work.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                      Focus
-                    </p>
-                    <p className="mt-2 text-sm font-medium leading-6 text-slate-100">
-                      Home for orientation, then one focused tool per view.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            <section
-              id={`panel-${activeTab}`}
-              role="tabpanel"
-              aria-label={`${activeTabMeta.label} panel`}
-              className="min-h-[420px]"
-            >
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={activeTab}
-                  initial={{ opacity: 0, y: 12, scale: 0.99 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.99 }}
-                  transition={{ duration: 0.24, ease: "easeOut" }}
-                >
-                  {activeTab === "home" && <HomeTab onSelectTab={setActiveTab} />}
-                  {activeTab === "keygen" && <KeyGen />}
-                  {activeTab === "encrypt" && <Encrypt />}
-                  {activeTab === "decrypt" && <Decrypt />}
-                  {activeTab === "sign" && <Sign />}
-                  {activeTab === "verify" && <Verify />}
-                  {activeTab === "network" && <NetworkTab />}
-                  {activeTab === "history" && <HistoryTab />}
-                </motion.div>
-              </AnimatePresence>
-            </section>
+      <div className="sticky top-0 z-40 border-b border-white/[0.08] bg-[#0a0a0e]/90 backdrop-blur">
+        <header className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Image src={favicon} alt="" className="h-7 w-7 shrink-0 object-contain" priority />
+            <span className="truncate text-[15px] font-semibold tracking-tight text-zinc-100">
+              CrypticComm
+            </span>
           </div>
-        </div>
-
-        <footer className="mt-8 flex flex-col gap-3 border-t border-white/10 px-1 pt-6 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <p>All cryptographic operations run locally in your browser unless you explicitly share data.</p>
-          <p className="font-mono text-xs tracking-[0.24em] text-slate-600">
-            Copyright {new Date().getFullYear()} CRYPTICCOMM
-          </p>
-        </footer>
+          <div className="flex items-center gap-2">
+            <WalletButton />
+            <a
+              href="https://github.com/rsvptr/crypticcomm/"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View the source on GitHub"
+              title="View the source on GitHub"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-400 transition-colors duration-150 hover:border-white/20 hover:text-zinc-100"
+            >
+              <Github className="h-4 w-4" />
+            </a>
+          </div>
+        </header>
+        <TabBar />
       </div>
-    </main>
+
+      <main id="content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+        {activeTab !== "home" && (
+          <header className="mb-5">
+            <h1 className="text-lg font-semibold tracking-tight text-zinc-100">
+              {activeTabMeta.title}
+            </h1>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">
+              {activeTabMeta.description}
+            </p>
+          </header>
+        )}
+
+        <section
+          id={`panel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${activeTab}`}
+        >
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16, ease: "easeOut" }}
+            >
+              {activeTab === "home" && <HomeTab onSelectTab={selectTab} />}
+              {activeTab === "keygen" && <KeyGen />}
+              {activeTab === "encrypt" && <Encrypt />}
+              {activeTab === "decrypt" && <Decrypt />}
+              {activeTab === "sign" && <Sign />}
+              {activeTab === "verify" && <Verify />}
+              {activeTab === "network" && <NetworkTab />}
+              {activeTab === "history" && <HistoryTab />}
+            </motion.div>
+          </AnimatePresence>
+        </section>
+      </main>
+
+      <footer className="border-t border-white/[0.06]">
+        <div className="mx-auto flex max-w-6xl flex-col gap-1.5 px-4 py-5 text-[13px] leading-5 text-zinc-600 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <p>
+            Cryptography runs locally in your browser. Built as a coursework project, not an
+            audited product.
+          </p>
+          <p className="shrink-0 font-mono text-xs">
+            {new Date().getFullYear()} CrypticComm, MIT license
+          </p>
+        </div>
+      </footer>
+    </div>
   );
 }
 
 export default function Home() {
   return (
-    <WalletProvider>
-      <HistoryProvider>
-        <ToastProvider>
-          <HomeContent />
-        </ToastProvider>
-      </HistoryProvider>
-    </WalletProvider>
+    <MotionConfig reducedMotion="user">
+      <WalletProvider>
+        <HistoryProvider>
+          <ToastProvider>
+            <WorkbenchProvider>
+              <NetworkProvider>
+                <HomeContent />
+              </NetworkProvider>
+            </WorkbenchProvider>
+          </ToastProvider>
+        </HistoryProvider>
+      </WalletProvider>
+    </MotionConfig>
   );
 }

@@ -10,7 +10,6 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
-import clsx from "clsx";
 
 type ToastVariant = "success" | "error" | "info";
 
@@ -35,25 +34,10 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
-const TOAST_STYLES: Record<
-  ToastVariant,
-  { icon: typeof CheckCircle2; classes: string }
-> = {
-  success: {
-    icon: CheckCircle2,
-    classes:
-      "border-emerald-500/30 bg-emerald-500/10 text-emerald-50 shadow-[0_18px_60px_rgba(16,185,129,0.18)]",
-  },
-  error: {
-    icon: AlertCircle,
-    classes:
-      "border-rose-500/30 bg-rose-500/10 text-rose-50 shadow-[0_18px_60px_rgba(244,63,94,0.2)]",
-  },
-  info: {
-    icon: Info,
-    classes:
-      "border-cyan-500/30 bg-cyan-500/10 text-cyan-50 shadow-[0_18px_60px_rgba(34,211,238,0.18)]",
-  },
+const TOAST_ICONS: Record<ToastVariant, { icon: typeof CheckCircle2; className: string }> = {
+  success: { icon: CheckCircle2, className: "text-emerald-400" },
+  error: { icon: AlertCircle, className: "text-rose-400" },
+  info: { icon: Info, className: "text-indigo-300" },
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -86,41 +70,41 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed right-4 top-20 z-[120] flex w-full max-w-sm flex-col gap-3 sm:right-6">
+      <div
+        aria-live="polite"
+        className="pointer-events-none fixed inset-x-4 bottom-4 z-[110] flex flex-col items-center gap-2 sm:inset-x-auto sm:right-5 sm:bottom-5 sm:items-end"
+      >
         <AnimatePresence initial={false}>
           {toasts.map((toast) => {
-            const tone = TOAST_STYLES[toast.variant];
+            const tone = TOAST_ICONS[toast.variant];
             const Icon = tone.icon;
 
             return (
               <motion.div
                 key={toast.id}
-                initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -10, scale: 0.98 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className={clsx(
-                  "pointer-events-auto overflow-hidden rounded-2xl border backdrop-blur-xl",
-                  tone.classes
-                )}
+                exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className="pointer-events-auto w-full max-w-sm rounded-lg border border-white/10 bg-surface-raised shadow-lg shadow-black/40"
               >
-                <div className="flex items-start gap-3 p-4">
-                  <div className="mt-0.5 rounded-full border border-white/10 bg-white/10 p-2">
-                    <Icon className="h-4 w-4" />
-                  </div>
+                <div className="flex items-start gap-2.5 px-3.5 py-3">
+                  <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone.className}`} />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold tracking-tight">{toast.title}</p>
+                    <p className="text-sm font-medium text-zinc-100">{toast.title}</p>
                     {toast.description && (
-                      <p className="mt-1 text-sm text-white/70">{toast.description}</p>
+                      <p className="mt-0.5 text-[13px] leading-5 text-zinc-400">
+                        {toast.description}
+                      </p>
                     )}
                   </div>
                   <button
                     type="button"
                     onClick={() => dismiss(toast.id)}
-                    className="rounded-full p-1 text-white/60 transition hover:bg-white/10 hover:text-white"
+                    className="rounded-md p-1 text-zinc-500 transition-colors duration-150 hover:bg-white/[0.06] hover:text-zinc-200"
                     aria-label="Dismiss notification"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </motion.div>

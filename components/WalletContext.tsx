@@ -1,7 +1,13 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { RSAKeyDict, generateKeyName, encryptWalletData, decryptWalletData } from "@/lib/rsa";
+import {
+  RSAKeyDict,
+  generateKeyName,
+  encryptWalletData,
+  decryptWalletData,
+  walletPayloadNeedsUpgrade,
+} from "@/lib/rsa";
 
 export interface StoredKey {
   id: string;
@@ -17,7 +23,7 @@ interface WalletContextType {
   unlockWallet: (password: string) => Promise<number>;
   createWallet: (password: string) => Promise<void>;
   lockWallet: () => void;
-  saveKey: (key: RSAKeyDict) => Promise<void>;
+  saveKey: (key: RSAKeyDict) => Promise<StoredKey>;
   deleteKey: (id: string) => Promise<void>;
   getKey: (id: string) => StoredKey | undefined;
 }
@@ -36,19 +42,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const stored = localStorage.getItem("cryptic_wallet_enc");
-    if (stored) {
-      setHasWallet(true);
-    } else {
-      // Migrate old plain text wallet to new encrypted format
-      const oldStored = localStorage.getItem("cryptic_wallet");
-      if (oldStored) {
-        setHasWallet(true);
-        // We can't auto-migrate because we need a password, so we just treat it as having a wallet.
-        // Actually, we could show a special migration screen, but for now we'll just ignore old for security
-        // or let them create a new wallet which overwrites it.
-      }
-    }
+    // Only the encrypted format counts as a wallet. Plaintext wallets from old
+    // builds can't be unlocked with a password, so they are ignored here and
+    // removed when a new encrypted wallet is created.
+    setHasWallet(Boolean(localStorage.getItem("cryptic_wallet_enc")));
   }, []);
 
   const createWallet = async (pwd: string) => {
@@ -62,22 +59,38 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   };
 
   const unlockWallet = async (pwd: string): Promise<number> => {
-    try {
-      const stored = localStorage.getItem("cryptic_wallet_enc");
-      if (stored) {
-        const decryptedKeys = await decryptWalletData(stored, pwd);
-        if (!Array.isArray(decryptedKeys)) {
-          throw new Error("Wallet data is corrupted.");
-        }
-        setKeys(decryptedKeys);
-        setIsLocked(false);
-        setPassword(pwd);
-        return decryptedKeys.length;
-      }
-      throw new Error("No encrypted wallet was found in this browser.");
-    } catch {
-      throw new Error("Incorrect password or unreadable wallet data.");
+    const stored = localStorage.getItem("cryptic_wallet_enc");
+    if (!stored) {
+      throw new Error("No wallet exists in this browser yet.");
     }
+
+    let decryptedKeys: StoredKey[];
+    try {
+      const decrypted = await decryptWalletData(stored, pwd);
+      if (!Array.isArray(decrypted)) {
+        throw new Error("corrupted");
+      }
+      decryptedKeys = decrypted;
+    } catch {
+      throw new Error("Wrong password, or the wallet data is unreadable.");
+    }
+
+    // Wallets written with an older, weaker work factor are quietly
+    // re-encrypted at the current strength; unlock is the only moment the
+    // password is available to do it. Best effort: if the write fails, the
+    // wallet still works at its old strength.
+    if (walletPayloadNeedsUpgrade(stored)) {
+      try {
+        await persistWallet(decryptedKeys, pwd);
+      } catch {
+        // Keep the unlock; the upgrade can happen on a later visit.
+      }
+    }
+
+    setKeys(decryptedKeys);
+    setIsLocked(false);
+    setPassword(pwd);
+    return decryptedKeys.length;
   };
 
   const lockWallet = () => {
@@ -87,7 +100,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   };
 
   const saveKey = async (keyData: RSAKeyDict) => {
-    if (isLocked || !password) throw new Error("Wallet is locked");
+    if (isLocked || !password)
+      throw new Error("The wallet is locked. Unlock it from the header first.");
 
     const existing = keys.find((key) => key.keys.public.n === keyData.public.n);
     if (existing) {
@@ -101,17 +115,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       keys: keyData,
       createdAt: Date.now(),
     };
-    
+
+    // Persist first: if the write fails (storage quota, private browsing),
+    // in-memory state must not claim the key was saved.
     const updated = [newKey, ...keys];
-    setKeys(updated);
     await persistWallet(updated, password);
+    setKeys(updated);
+    return newKey;
   };
 
   const deleteKey = async (id: string) => {
-    if (isLocked || !password) throw new Error("Wallet is locked");
+    if (isLocked || !password)
+      throw new Error("The wallet is locked. Unlock it from the header first.");
     const updated = keys.filter((k) => k.id !== id);
-    setKeys(updated);
     await persistWallet(updated, password);
+    setKeys(updated);
   };
 
   const getKey = (id: string) => keys.find((k) => k.id === id);

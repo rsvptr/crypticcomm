@@ -20,7 +20,10 @@ export function bigIntToText(val: bigint): string {
   for (let i = 0; i < len; i++) {
     u8[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
   }
-  return new TextDecoder().decode(u8);
+  // Strict decoding: tampered textbook ciphertext almost never decrypts to
+  // valid UTF-8, so throwing here lets callers count the segment as failed
+  // instead of silently emitting mojibake.
+  return new TextDecoder("utf-8", { fatal: true }).decode(u8);
 }
 
 export async function sha256(data: string | object): Promise<string> {
@@ -353,13 +356,83 @@ export async function pemToRSAKeyDict(
   }
 }
 
+// --- Key input parsing (shared by Encrypt, Decrypt, Sign, Verify) ---
+
+// JSON is tried first: keys exported by this app embed their PEM string
+// inside the JSON, so a PEM marker alone doesn't mean the input is a PEM
+// block. PEM detection uses includes() so leading whitespace or comment
+// lines around a real PEM block don't break it.
+export async function parsePublicKeyInput(rawInput: string): Promise<PublicKeyRecord> {
+  const trimmed = rawInput.trim();
+
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // Not JSON; fall through to PEM handling.
+  }
+
+  if (parsed && typeof parsed === "object") {
+    if (
+      typeof (parsed as PublicKeyRecord).n !== "string" ||
+      typeof (parsed as PublicKeyRecord).e !== "string"
+    ) {
+      throw new Error('Public key JSON needs string values for "n" and "e".');
+    }
+    return parsed as PublicKeyRecord;
+  }
+
+  if (trimmed.includes("-----BEGIN PUBLIC KEY-----")) {
+    return pemToRSAKeyDict(trimmed, "public");
+  }
+  if (trimmed.includes("-----BEGIN")) {
+    throw new Error(
+      "This looks like a PEM block, but not a public key. Expected -----BEGIN PUBLIC KEY-----."
+    );
+  }
+
+  throw new Error("Paste the public key as JSON or as a PEM block.");
+}
+
+export async function parsePrivateKeyInput(rawInput: string): Promise<PrivateKeyRecord> {
+  const trimmed = rawInput.trim();
+
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // Not JSON; fall through to PEM handling.
+  }
+
+  if (parsed && typeof parsed === "object") {
+    if (
+      typeof (parsed as PrivateKeyRecord).n !== "string" ||
+      typeof (parsed as PrivateKeyRecord).d !== "string"
+    ) {
+      throw new Error('Private key JSON needs string values for "n" and "d".');
+    }
+    return parsed as PrivateKeyRecord;
+  }
+
+  if (trimmed.includes("-----BEGIN PRIVATE KEY-----")) {
+    return pemToRSAKeyDict(trimmed, "private");
+  }
+  if (trimmed.includes("-----BEGIN")) {
+    throw new Error(
+      "This looks like a PEM block, but not a private key. Expected -----BEGIN PRIVATE KEY-----."
+    );
+  }
+
+  throw new Error("Paste the private key as JSON or as a PEM block.");
+}
+
 export function dictToPrivJwk(priv: { n: string, e: string, d: string, p?: string, q?: string }): JsonWebKey {
     const n = BigInt(priv.n);
     const e = BigInt(priv.e);
     const d = BigInt(priv.d);
-    
+
     if (!priv.p || !priv.q) {
-        throw new Error("Private key missing 'p' and 'q'. Cannot use for OAEP/Signatures.");
+        throw new Error("This private key is missing its prime factors (p and q), so it can only be used for textbook RSA.");
     }
 
     const p = BigInt(priv.p);
@@ -443,6 +516,18 @@ export async function verifySignature(message: string, signatureHex: string, pub
     );
 }
 
+// --- Key fingerprints ---
+
+/**
+ * Short SHA-256 fingerprint of a public modulus, formatted for reading aloud
+ * or comparing over a second channel (80 bits, e.g. "3F9A:0C21:BB04:1D7E:52A8").
+ * Two peers seeing the same fingerprint are talking to the same key.
+ */
+export async function keyFingerprint(modulus: string): Promise<string> {
+  const hash = await sha256(modulus);
+  return (hash.slice(0, 20).match(/.{4}/g) ?? []).join(":").toUpperCase();
+}
+
 // --- Key Naming (Deterministic) ---
 
 const ADJECTIVES = ["Cosmic", "Quantum", "Nebula", "Silent", "Iron", "Crystal", "Void", "Solar", "Lunar", "Cyber", "Hidden", "Golden", "Rapid", "Secret", "Mystic", "Frozen"];
@@ -461,7 +546,24 @@ export async function generateKeyName(pubKey: RSAKeyDict['public']): Promise<str
 
 // --- Wallet Encryption (Master Password) ---
 
-async function getMasterKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+/** Current PBKDF2 work factor, following OWASP guidance for PBKDF2-HMAC-SHA256. */
+export const WALLET_KDF_ITERATIONS = 600_000;
+/** Wallets written before the payload carried KDF parameters used this value. */
+const LEGACY_KDF_ITERATIONS = 100_000;
+
+interface WalletPayload {
+  v?: number;
+  kdf?: { name: string; hash: string; iterations: number };
+  salt: string;
+  iv: string;
+  data: string;
+}
+
+async function getMasterKey(
+  password: string,
+  salt: Uint8Array,
+  iterations: number
+): Promise<CryptoKey> {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -474,7 +576,7 @@ async function getMasterKey(password: string, salt: Uint8Array): Promise<CryptoK
     {
       name: "PBKDF2",
       salt: salt as any,
-      iterations: 100000,
+      iterations,
       hash: "SHA-256",
     },
     keyMaterial,
@@ -487,8 +589,8 @@ async function getMasterKey(password: string, salt: Uint8Array): Promise<CryptoK
 export async function encryptWalletData(data: unknown, password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await getMasterKey(password, salt);
-  
+  const key = await getMasterKey(password, salt, WALLET_KDF_ITERATIONS);
+
   const enc = new TextEncoder();
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: iv },
@@ -496,7 +598,11 @@ export async function encryptWalletData(data: unknown, password: string): Promis
     enc.encode(JSON.stringify(data))
   );
 
-  const payload = {
+  // The payload records its own KDF parameters so the work factor can be
+  // raised in the future without stranding wallets written today.
+  const payload: WalletPayload = {
+    v: 2,
+    kdf: { name: "PBKDF2", hash: "SHA-256", iterations: WALLET_KDF_ITERATIONS },
     salt: arrayBufferToBase64(salt.buffer),
     iv: arrayBufferToBase64(iv.buffer),
     data: arrayBufferToBase64(encrypted)
@@ -505,14 +611,22 @@ export async function encryptWalletData(data: unknown, password: string): Promis
 }
 
 export async function decryptWalletData(encryptedJson: string, password: string): Promise<unknown> {
-  const payload = JSON.parse(encryptedJson);
-  
+  const payload = JSON.parse(encryptedJson) as WalletPayload;
+
+  // Payloads from before v2 carry no KDF block; they were all written with
+  // the legacy iteration count. The bounds check keeps a corrupted or
+  // hand-edited payload from turning key derivation into a hang.
+  const iterations = payload.kdf?.iterations ?? LEGACY_KDF_ITERATIONS;
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 5_000_000) {
+    throw new Error("Unsupported wallet key derivation parameters.");
+  }
+
   const salt = Uint8Array.from(atob(payload.salt), c => c.charCodeAt(0));
   const iv = Uint8Array.from(atob(payload.iv), c => c.charCodeAt(0));
   const encryptedData = Uint8Array.from(atob(payload.data), c => c.charCodeAt(0));
 
-  const key = await getMasterKey(password, salt);
-  
+  const key = await getMasterKey(password, salt, iterations);
+
   const decrypted = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: iv },
     key,
@@ -521,4 +635,18 @@ export async function decryptWalletData(encryptedJson: string, password: string)
 
   const dec = new TextDecoder();
   return JSON.parse(dec.decode(decrypted));
+}
+
+/**
+ * True when a stored wallet was encrypted with a weaker work factor than the
+ * current default. Callers re-encrypt after a successful unlock, which is the
+ * only moment the password is available.
+ */
+export function walletPayloadNeedsUpgrade(encryptedJson: string): boolean {
+  try {
+    const payload = JSON.parse(encryptedJson) as WalletPayload;
+    return (payload.kdf?.iterations ?? LEGACY_KDF_ITERATIONS) < WALLET_KDF_ITERATIONS;
+  } catch {
+    return false;
+  }
 }

@@ -1,20 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import favicon from "@/assets/favicon.png";
 import "@/styles/globals.css";
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space-grotesk",
-  display: "swap",
-});
-
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-ibm-plex-mono",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://crypticcomm.vercel.app"),
@@ -23,7 +11,7 @@ export const metadata: Metadata = {
     template: "%s | CrypticComm",
   },
   description:
-    "A privacy-first RSA learning suite for key generation, encryption, signatures, wallet storage, and encrypted peer messaging.",
+    "An RSA workspace that runs entirely in your browser: key generation, OAEP encryption, RSA-PSS signatures, an encrypted key wallet, and peer-to-peer encrypted chat.",
   keywords: [
     "CrypticComm",
     "RSA",
@@ -42,7 +30,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "CrypticComm",
     description:
-      "Learn RSA hands-on with browser-only encryption, signatures, wallet storage, and encrypted WebRTC chat.",
+      "Learn RSA by using it: generate keys, encrypt, sign, verify, and chat over an encrypted peer connection, all in the browser.",
     url: "https://crypticcomm.vercel.app",
     siteName: "CrypticComm",
     locale: "en_GB",
@@ -52,12 +40,12 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "CrypticComm",
     description:
-      "Browser-native RSA learning suite with PEM export, wallet storage, and encrypted peer chat.",
+      "Learn RSA by using it: generate keys, encrypt, sign, verify, and chat over an encrypted peer connection, all in the browser.",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#060816",
+  themeColor: "#0a0a0e",
   colorScheme: "dark",
 };
 
@@ -69,7 +57,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${spaceGrotesk.variable} ${ibmPlexMono.variable}`}
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
       suppressHydrationWarning
     >
       <body className="font-sans antialiased">{children}</body>

@@ -1,61 +1,83 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  Check,
-  Copy,
-  Download,
-  FileJson,
-  RefreshCcw,
-  Unlock,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { Check, Copy, Download, RotateCcw } from "lucide-react";
 import {
   decryptSegmentOAEP,
   decryptSegmentTextbook,
   dictToPrivJwk,
-  pemToRSAKeyDict,
+  parsePrivateKeyInput,
   sha256,
 } from "@/lib/rsa";
+import { downloadTextFile, timestampedFilename } from "@/lib/download";
 import { useHistory } from "@/components/HistoryContext";
 import { useToast } from "@/components/ToastContext";
 import { useWallet } from "@/components/WalletContext";
-import { Card, FadeIn, FileUpload, NeonButton } from "@/components/ui/Motion";
+import { useWorkbench } from "@/components/WorkbenchContext";
+import {
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  FadeIn,
+  FileUpload,
+  IconButton,
+  PopIn,
+  SPRING_POP,
+} from "@/components/ui/Motion";
+import {
+  KeyStatusLine,
+  SelectedIdentityNotice,
+  useParsedKeyInfo,
+  WalletKeyPicker,
+} from "@/components/ui/KeyInput";
+import { useCopy } from "@/components/ui/useCopy";
 
 interface EncryptedPayload {
   segments: string[];
   oaep: boolean;
+  message_sha256?: string;
 }
+
+type IntegrityResult = "match" | "mismatch" | "none";
 
 interface DecryptStats {
   total: number;
   failed: number;
   sha256: string;
+  integrity: IntegrityResult;
+  segmentOk: boolean[];
 }
 
-interface ParsedPrivateKey {
-  n: string;
-  e: string;
-  d: string;
-  p?: string;
-  q?: string;
-}
+const MAX_SEGMENT_CHIPS = 48;
 
-function downloadTextFile(filename: string, content: string, type: string) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+function parseEncryptedPayload(rawInput: string): EncryptedPayload {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawInput);
+  } catch {
+    throw new Error("The encrypted payload has to be valid JSON.");
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Array.isArray((parsed as EncryptedPayload).segments) ||
+    typeof (parsed as EncryptedPayload).oaep !== "boolean"
+  ) {
+    throw new Error('The payload JSON needs a "segments" array and an "oaep" flag.');
+  }
+
+  return parsed as EncryptedPayload;
 }
 
 export default function Decrypt() {
   const { keys } = useWallet();
   const { addHistory } = useHistory();
+  const { consumeDecryptHandoff } = useWorkbench();
   const toast = useToast();
+  const { copied, copy } = useCopy();
 
   const [privKeyInput, setPrivKeyInput] = useState("");
   const [encryptedInput, setEncryptedInput] = useState("");
@@ -63,73 +85,43 @@ export default function Decrypt() {
   const [output, setOutput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<DecryptStats | null>(null);
-  const [copied, setCopied] = useState(false);
   const [selectedWalletKeyId, setSelectedWalletKeyId] = useState("");
+
+  // Pick up a payload handed over from the Encrypt tab.
+  useEffect(() => {
+    const handoff = consumeDecryptHandoff();
+    if (handoff) {
+      setEncryptedInput(handoff);
+    }
+  }, [consumeDecryptHandoff]);
 
   const selectedWalletKey = useMemo(
     () => keys.find((key) => key.id === selectedWalletKeyId),
     [keys, selectedWalletKeyId]
   );
+  const keyInfo = useParsedKeyInfo(privKeyInput, "private");
 
-  const parsePrivateKey = async (rawInput: string): Promise<ParsedPrivateKey> => {
-    const trimmedInput = rawInput.trim();
-
-    if (trimmedInput.startsWith("-----BEGIN PRIVATE KEY-----")) {
-      return pemToRSAKeyDict(trimmedInput, "private");
+  // If the selected wallet identity disappears (wallet locked, key deleted),
+  // scrub the key material that came from it.
+  useEffect(() => {
+    if (selectedWalletKeyId && !selectedWalletKey) {
+      setSelectedWalletKeyId("");
+      setPrivKeyInput("");
     }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmedInput);
-    } catch {
-      throw new Error("Private key must be valid JSON or a PEM block.");
-    }
-
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      typeof (parsed as ParsedPrivateKey).n !== "string" ||
-      typeof (parsed as ParsedPrivateKey).d !== "string"
-    ) {
-      throw new Error("Private key JSON must include string values for n and d.");
-    }
-
-    return parsed as ParsedPrivateKey;
-  };
-
-  const parseEncryptedPayload = (rawInput: string): EncryptedPayload => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawInput);
-    } catch {
-      throw new Error("Encrypted payload must be valid JSON.");
-    }
-
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      !Array.isArray((parsed as EncryptedPayload).segments) ||
-      typeof (parsed as EncryptedPayload).oaep !== "boolean"
-    ) {
-      throw new Error("Encrypted payload JSON must include segments[] and oaep.");
-    }
-
-    return parsed as EncryptedPayload;
-  };
+  }, [selectedWalletKey, selectedWalletKeyId]);
 
   const handleDecrypt = async () => {
     setError(null);
     setLoading(true);
     setOutput("");
     setStats(null);
-    setCopied(false);
 
     try {
       if (!privKeyInput.trim() || !encryptedInput.trim()) {
-        throw new Error("Private key and encrypted payload are required.");
+        throw new Error("Load a private key and paste the encrypted payload first.");
       }
 
-      const privKeyData = await parsePrivateKey(privKeyInput);
+      const privKeyData = await parsePrivateKeyInput(privKeyInput);
       const encryptedPayload = parseEncryptedPayload(encryptedInput);
 
       let privJwk: JsonWebKey | undefined;
@@ -138,47 +130,79 @@ export default function Decrypt() {
       }
 
       const decryptedSegments: string[] = [];
+      const segmentOk: boolean[] = [];
       let failed = 0;
 
       for (const segment of encryptedPayload.segments) {
-        const plaintext = encryptedPayload.oaep && privJwk
-          ? await decryptSegmentOAEP(segment, privJwk)
-          : decryptSegmentTextbook(segment, privKeyData.n, privKeyData.d);
+        const plaintext =
+          encryptedPayload.oaep && privJwk
+            ? await decryptSegmentOAEP(segment, privJwk)
+            : decryptSegmentTextbook(segment, privKeyData.n, privKeyData.d);
 
-        if (plaintext.startsWith("[Decryption error")) {
+        const ok = !plaintext.startsWith("[Decryption error");
+        if (!ok) {
           failed += 1;
         }
 
+        segmentOk.push(ok);
         decryptedSegments.push(plaintext);
       }
 
       const finalMessage = decryptedSegments.join("");
+      const recoveredHash = await sha256(finalMessage);
+      // Payloads from the Encrypt tab carry the hash of the original message,
+      // which lets the recipient prove the recovered text is byte-identical.
+      const integrity: IntegrityResult = encryptedPayload.message_sha256
+        ? encryptedPayload.message_sha256 === recoveredHash
+          ? "match"
+          : "mismatch"
+        : "none";
+
       setOutput(finalMessage);
       setStats({
         total: encryptedPayload.segments.length,
         failed,
-        sha256: await sha256(finalMessage),
+        sha256: recoveredHash,
+        integrity,
+        segmentOk,
       });
 
       addHistory({
         type: "Decrypt",
         details: {
-          message: `Encrypted JSON (${encryptedPayload.segments.length} segment${
+          message: `Encrypted payload with ${encryptedPayload.segments.length} segment${
             encryptedPayload.segments.length === 1 ? "" : "s"
-          })`,
+          }`,
           output: finalMessage,
           keyName: selectedWalletKey?.name,
-          status: failed > 0 ? "Partial Failure" : "Success",
+          status:
+            failed > 0
+              ? "Partial Failure"
+              : integrity === "mismatch"
+                ? "Hash mismatch"
+                : "Success",
         },
       });
 
-      toast.success({
-        title: failed > 0 ? "Message partially decrypted" : "Message decrypted",
-        description:
-          failed > 0
-            ? `${failed} segment${failed === 1 ? "" : "s"} could not be recovered cleanly.`
-            : "The plaintext has been reconstructed successfully.",
-      });
+      if (failed > 0) {
+        toast.error({
+          title: "Partially decrypted",
+          description: `${failed} of ${encryptedPayload.segments.length} segments could not be recovered. Check that the key matches.`,
+        });
+      } else if (integrity === "mismatch") {
+        toast.error({
+          title: "Decrypted, but altered",
+          description: "The recovered text does not hash to the value stored in the payload.",
+        });
+      } else {
+        toast.success({
+          title: "Message decrypted",
+          description:
+            integrity === "match"
+              ? "Every segment recovered, and the hash matches the original."
+              : "The plaintext was rebuilt from every segment.",
+        });
+      }
     } catch (error) {
       const messageText =
         error instanceof Error ? error.message : "The payload could not be decrypted.";
@@ -197,18 +221,11 @@ export default function Decrypt() {
       return;
     }
 
-    try {
-      await navigator.clipboard.writeText(output);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-      toast.success({
-        title: "Plaintext copied",
-        description: "The recovered message is now on your clipboard.",
-      });
-    } catch {
+    const ok = await copy(output, "plaintext");
+    if (!ok) {
       toast.error({
         title: "Copy failed",
-        description: "Clipboard access was blocked by the browser.",
+        description: "The browser blocked clipboard access.",
       });
     }
   };
@@ -220,246 +237,240 @@ export default function Decrypt() {
     setOutput("");
     setError(null);
     setStats(null);
-    setCopied(false);
   };
 
   return (
-    <div className="space-y-6">
-      <FadeIn className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-6">
-          <Card className="px-5 py-6">
-            <div className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Recipient identity
-                </p>
-                <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-white">
-                  <Unlock className="h-5 w-5 text-cyan-300" />
-                  Private key
-                </h2>
-                <p className="mt-2 text-sm leading-7 text-slate-400">
-                  Load the matching private key to recover the plaintext from the encrypted JSON.
-                </p>
-              </div>
+    <FadeIn className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_370px]">
+      <div className="space-y-4">
+        <Card>
+          <CardHeader
+            title="Private key"
+            description="Only the private key that matches the encryption key can recover the message."
+            actions={
               <FileUpload
                 onFileSelect={(data) => {
                   setPrivKeyInput(data);
                   setSelectedWalletKeyId("");
                 }}
-                label="Load key"
+                label="Load JSON or PEM"
                 accept=".json,.pem,.txt"
               />
-            </div>
-
-            {keys.length > 0 && (
-              <div className="mt-5">
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  Saved identities
-                </label>
-                <select
-                  onChange={(event) => {
-                    const key = keys.find((entry) => entry.id === event.target.value);
-                    if (key) {
-                      setSelectedWalletKeyId(key.id);
-                      setPrivKeyInput(JSON.stringify(key.keys.private, null, 2));
-                    } else {
-                      setSelectedWalletKeyId("");
-                      setPrivKeyInput("");
-                    }
-                  }}
-                  value={selectedWalletKeyId}
-                  className="field-input"
-                >
-                  <option value="">Choose a wallet identity</option>
-                  {keys.map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            }
+          />
+          <CardBody>
+            <WalletKeyPicker
+              selectedId={selectedWalletKeyId}
+              onSelect={(key) => {
+                if (key) {
+                  setSelectedWalletKeyId(key.id);
+                  setPrivKeyInput(JSON.stringify(key.keys.private, null, 2));
+                } else {
+                  setSelectedWalletKeyId("");
+                  setPrivKeyInput("");
+                }
+              }}
+            />
+            {selectedWalletKey ? (
+              <SelectedIdentityNotice
+                name={selectedWalletKey.name}
+                detail="Private key loaded from the wallet. It stays in memory on this device."
+                onClear={() => setSelectedWalletKeyId("")}
+              />
+            ) : (
+              <textarea
+                value={privKeyInput}
+                onChange={(event) => {
+                  setPrivKeyInput(event.target.value);
+                  setSelectedWalletKeyId("");
+                }}
+                placeholder="Paste a private key as JSON or PEM"
+                aria-label="Private key"
+                className="field-area min-h-[11rem]"
+              />
             )}
+            <KeyStatusLine info={keyInfo} kind="private" />
+          </CardBody>
+        </Card>
 
-            <div className="mt-5">
-              {selectedWalletKey ? (
-                <div className="rounded-[26px] border border-rose-500/20 bg-rose-500/10 px-5 py-5">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-rose-200/80">
-                    Using wallet identity
-                  </p>
-                  <h3 className="mt-2 text-xl font-semibold tracking-tight text-white">
-                    {selectedWalletKey.name}
-                  </h3>
-                  <p className="mt-2 text-sm leading-6 text-rose-100/80">
-                    The matching private key is loaded in memory. Switch to raw mode if you need to
-                    inspect or edit the key manually.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWalletKeyId("")}
-                    className="mt-4 text-sm font-medium text-cyan-200 transition hover:text-white"
-                  >
-                    Edit raw key
-                  </button>
-                </div>
-              ) : (
-                <textarea
-                  value={privKeyInput}
-                  onChange={(event) => {
-                    setPrivKeyInput(event.target.value);
-                    setSelectedWalletKeyId("");
-                  }}
-                  placeholder="Paste private key JSON or PEM..."
-                  className="field-area min-h-[220px] text-rose-50/80"
-                />
-              )}
-            </div>
-          </Card>
-
-          <Card className="px-5 py-6">
-            <div className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Ciphertext
-                </p>
-                <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-white">
-                  <FileJson className="h-5 w-5 text-cyan-300" />
-                  Encrypted payload
-                </h2>
-                <p className="mt-2 text-sm leading-7 text-slate-400">
-                  Paste the encryption result JSON with segments and mode metadata.
-                </p>
-              </div>
-              <FileUpload onFileSelect={setEncryptedInput} label="Load JSON" accept=".json,.txt" />
-            </div>
-
+        <Card>
+          <CardHeader
+            title="Encrypted payload"
+            description="The JSON produced by the Encrypt tab, segments and mode flag included."
+            actions={<FileUpload onFileSelect={setEncryptedInput} label="Load JSON" accept=".json,.txt" />}
+          />
+          <CardBody>
             <textarea
               value={encryptedInput}
               onChange={(event) => setEncryptedInput(event.target.value)}
-              placeholder="Paste encrypted JSON..."
-              className="field-area mt-5 min-h-[220px]"
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  if (!loading && privKeyInput.trim() && encryptedInput.trim()) {
+                    void handleDecrypt();
+                  }
+                }
+              }}
+              placeholder="Paste the encrypted JSON payload"
+              aria-label="Encrypted payload"
+              className="field-area min-h-[11rem]"
             />
-          </Card>
-        </div>
+          </CardBody>
+        </Card>
+      </div>
 
-        <div className="space-y-6">
-          <Card className="px-5 py-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Action
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                  Recover plaintext
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={clearAll}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-400 transition hover:border-white/20 hover:text-white"
-              >
-                <RefreshCcw className="h-3.5 w-3.5" />
-                Clear all
-              </button>
-            </div>
-
-            <p className="mt-4 text-sm leading-7 text-slate-400">
-              CrypticComm will reconstruct each segment in order, then join them back into a single
-              message.
+      <div className="space-y-4">
+        <Card>
+          <CardHeader
+            title="Decrypt"
+            actions={
+              <Button variant="ghost" size="sm" onClick={clearAll}>
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </Button>
+            }
+          />
+          <CardBody>
+            <p className="text-[13px] leading-5 text-zinc-500">
+              Each segment is decrypted on its own and the results are joined in order, so a
+              single bad segment doesn&apos;t take the whole message down with it.
             </p>
 
             {error && (
-              <div className="mt-4 rounded-[22px] border border-rose-500/20 bg-rose-500/10 px-4 py-4 text-sm text-rose-100">
+              <div role="alert" className="notice-danger mt-3">
                 {error}
               </div>
             )}
 
-            <NeonButton
+            <Button
               onClick={handleDecrypt}
               disabled={loading || !privKeyInput.trim() || !encryptedInput.trim()}
-              className="mt-6 w-full"
+              className="mt-4 w-full"
               size="lg"
+              title="Ctrl+Enter in the payload box also runs this"
             >
-              {loading ? "Decrypting..." : "Decrypt message"}
-            </NeonButton>
-          </Card>
+              {loading ? "Decrypting" : "Decrypt payload"}
+            </Button>
+          </CardBody>
+        </Card>
 
-          <Card className="px-5 py-6">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Output
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                  Decrypted plaintext
-                </h2>
-              </div>
-              {output && (
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="icon-btn"
-                  aria-label="Copy decrypted plaintext"
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4 text-emerald-300" />
-                  ) : (
-                    <Copy className="h-4 w-4" />
-                  )}
-                </button>
-              )}
-            </div>
-
+        <Card>
+          <CardHeader
+            title="Recovered plaintext"
+            actions={
+              output ? (
+                <>
+                  <IconButton label="Copy plaintext" onClick={handleCopy}>
+                    {copied === "plaintext" ? (
+                      <Check className="h-4 w-4 animate-pop text-emerald-400" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </IconButton>
+                  <IconButton
+                    label="Download plaintext"
+                    onClick={() =>
+                      downloadTextFile(
+                        timestampedFilename("decrypted-message", "txt"),
+                        output,
+                        "text/plain"
+                      )
+                    }
+                  >
+                    <Download className="h-4 w-4" />
+                  </IconButton>
+                </>
+              ) : undefined
+            }
+          />
+          <CardBody>
             {stats && (
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div className="metric-tile">
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                    Segments
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-white">{stats.total}</p>
-                </div>
-                <div className="metric-tile">
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                    Failures
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-white">{stats.failed}</p>
-                </div>
-                <div className="metric-tile">
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                    Result
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-white">
-                    {stats.failed > 0 ? "Partial" : "Clean"}
-                  </p>
-                </div>
-              </div>
+              <PopIn key={`${stats.sha256}-${stats.total}-${stats.failed}`}>
+                <dl className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div>
+                    <dt className="text-xs text-zinc-500">Segments</dt>
+                    <dd className="mt-0.5 font-mono text-sm text-zinc-200">{stats.total}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-zinc-500">Failed</dt>
+                    <dd
+                      className={`mt-0.5 font-mono text-sm ${
+                        stats.failed > 0 ? "text-rose-300" : "text-zinc-200"
+                      }`}
+                    >
+                      {stats.failed}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-zinc-500">Result</dt>
+                    <dd
+                      className={`mt-0.5 font-mono text-sm ${
+                        stats.failed > 0 ? "text-rose-300" : "text-emerald-300"
+                      }`}
+                    >
+                      {stats.failed > 0 ? "Partial" : "Clean"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-zinc-500">Integrity</dt>
+                    <dd
+                      className={`mt-0.5 font-mono text-sm ${
+                        stats.integrity === "match"
+                          ? "text-emerald-300"
+                          : stats.integrity === "mismatch"
+                            ? "text-rose-300"
+                            : "text-zinc-500"
+                      }`}
+                    >
+                      {stats.integrity === "match"
+                        ? "Verified"
+                        : stats.integrity === "mismatch"
+                          ? "Hash differs"
+                          : "No hash"}
+                    </dd>
+                  </div>
+                </dl>
+
+                {(stats.total > 1 || stats.failed > 0) && (
+                  <div className="mb-4">
+                    <p className="mb-1.5 text-xs text-zinc-500">Per-segment result</p>
+                    <div className="flex flex-wrap gap-1">
+                      {stats.segmentOk.slice(0, MAX_SEGMENT_CHIPS).map((ok, index) => (
+                        <motion.span
+                          key={index}
+                          initial={{ opacity: 0, scale: 0.5 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ ...SPRING_POP, delay: index * 0.015 }}
+                          title={`Segment ${index + 1}: ${ok ? "recovered" : "failed"}`}
+                          className={`inline-flex h-6 min-w-6 items-center justify-center rounded-md border px-1 font-mono text-[10px] ${
+                            ok
+                              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+                              : "border-rose-500/30 bg-rose-500/15 text-rose-300"
+                          }`}
+                        >
+                          {index + 1}
+                        </motion.span>
+                      ))}
+                      {stats.total > MAX_SEGMENT_CHIPS && (
+                        <span className="inline-flex h-6 items-center rounded-md border border-white/10 bg-white/[0.04] px-1.5 font-mono text-[10px] text-zinc-500">
+                          +{stats.total - MAX_SEGMENT_CHIPS} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </PopIn>
             )}
 
             <textarea
               readOnly
               value={output}
-              placeholder="Decrypted text will appear here..."
-              className="field-area mt-5 min-h-[260px] resize-none text-sm text-indigo-100"
+              placeholder="The decrypted text will appear here"
+              aria-label="Decrypted plaintext"
+              className="field-area min-h-[13rem] font-sans text-sm"
             />
-
-            {output && (
-              <NeonButton
-                variant="secondary"
-                onClick={() =>
-                  downloadTextFile(
-                    `decrypted-message-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`,
-                    output,
-                    "text/plain"
-                  )
-                }
-                className="mt-4 w-full"
-              >
-                <Download className="h-4 w-4" />
-                Download plaintext
-              </NeonButton>
-            )}
-          </Card>
-        </div>
-      </FadeIn>
-    </div>
+          </CardBody>
+        </Card>
+      </div>
+    </FadeIn>
   );
 }

@@ -9,27 +9,27 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
+        sans: ["var(--font-geist-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["var(--font-geist-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
-      backgroundImage: {
-        "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
-        "gradient-conic":
-          "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
+      colors: {
+        // Surface scale for the dark theme. Page background lives in globals.css.
+        surface: {
+          DEFAULT: "#111116", // panels and cards
+          inset: "#0c0c11", // code blocks, text areas, recessed fields
+          raised: "#17171e", // hover states, chips
+        },
       },
       keyframes: {
-        drift: {
-          "0%, 100%": { transform: "translate3d(0, 0, 0) scale(1)" },
-          "50%": { transform: "translate3d(0, -18px, 0) scale(1.04)" },
-        },
-        shimmer: {
-          "0%": { backgroundPosition: "0% 50%" },
-          "100%": { backgroundPosition: "100% 50%" },
+        pop: {
+          "0%": { transform: "scale(0.5)", opacity: "0.4" },
+          "100%": { transform: "scale(1)", opacity: "1" },
         },
       },
       animation: {
-        drift: "drift 10s ease-in-out infinite",
-        shimmer: "shimmer 6s linear infinite alternate",
+        // Icon-swap feedback (copy buttons, unread dot). Guarded globally by
+        // the prefers-reduced-motion rule in globals.css.
+        pop: "pop 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
       },
     },
   },

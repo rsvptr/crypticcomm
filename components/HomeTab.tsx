@@ -1,126 +1,213 @@
 "use client";
 
-import { Home, Lock, Network, PenTool, ShieldCheck, Sparkles } from "lucide-react";
-import { Card, FadeIn, NeonButton } from "@/components/ui/Motion";
+import {
+  ChevronRight,
+  Clock,
+  KeyRound,
+  Lock,
+  MessageSquare,
+  PenTool,
+  ShieldCheck,
+  Unlock,
+} from "lucide-react";
+import { Button, Card, CardBody, StaggerGroup, StaggerItem } from "@/components/ui/Motion";
 
-type HomeQuickTab = "keygen" | "network";
+type ToolTab =
+  | "keygen"
+  | "encrypt"
+  | "decrypt"
+  | "sign"
+  | "verify"
+  | "network"
+  | "history";
 
-export default function HomeTab({ onSelectTab }: { onSelectTab: (tabId: HomeQuickTab) => void }) {
+const TOOLS: {
+  id: ToolTab;
+  icon: typeof KeyRound;
+  name: string;
+  description: string;
+}[] = [
+  {
+    id: "keygen",
+    icon: KeyRound,
+    name: "Keys",
+    description: "Generate 1024 to 4096-bit RSA pairs with JSON and PEM export.",
+  },
+  {
+    id: "encrypt",
+    icon: Lock,
+    name: "Encrypt",
+    description: "Turn plaintext into a segmented payload with OAEP or textbook RSA.",
+  },
+  {
+    id: "decrypt",
+    icon: Unlock,
+    name: "Decrypt",
+    description: "Rebuild the plaintext and see exactly which segments failed.",
+  },
+  {
+    id: "sign",
+    icon: PenTool,
+    name: "Sign",
+    description: "Create RSA-PSS signatures over any message with SHA-256.",
+  },
+  {
+    id: "verify",
+    icon: ShieldCheck,
+    name: "Verify",
+    description: "Check whether a signature matches a message and public key.",
+  },
+  {
+    id: "network",
+    icon: MessageSquare,
+    name: "Peer chat",
+    description: "Connect two browsers over WebRTC and chat with RSA-encrypted messages.",
+  },
+  {
+    id: "history",
+    icon: Clock,
+    name: "History",
+    description: "Review this session's operations. Cleared on refresh by design.",
+  },
+];
+
+const FIRST_RUN_STEPS = [
+  {
+    title: "Create a key pair",
+    body: "2048 bits is a good default. Save it to the wallet so every tool can use it.",
+  },
+  {
+    title: "Round-trip a message",
+    body: "Encrypt something, then follow the payload straight into Decrypt with one click.",
+  },
+  {
+    title: "Prove authorship",
+    body: "Sign a message, check it in Verify, then change one character and watch it fail.",
+  },
+  {
+    title: "Go peer to peer",
+    body: "Open Peer chat in two windows, swap IDs, and compare key fingerprints.",
+  },
+];
+
+export default function HomeTab({ onSelectTab }: { onSelectTab: (tabId: ToolTab) => void }) {
   return (
-    <div className="space-y-6">
-      <FadeIn>
-        <Card className="overflow-hidden px-6 py-7 sm:px-8">
-          <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr] xl:items-center">
-            <div>
-              <div className="glass-pill text-cyan-100">
-                <Sparkles className="h-3.5 w-3.5" />
-                Browser-native cryptography workspace
-              </div>
-              <h2 className="mt-5 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                Learn RSA, signatures, and encrypted peer messaging in one place.
+    <StaggerGroup className="space-y-10 py-2 sm:py-6">
+      <StaggerItem>
+        <div className="max-w-2xl">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-50 sm:text-4xl">
+            Learn RSA by actually using it.
+          </h1>
+          <p className="mt-4 text-base leading-7 text-zinc-400">
+            Generate keys, encrypt and sign messages, then chat over an encrypted peer
+            connection. It all runs in your browser.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Button onClick={() => onSelectTab("keygen")}>
+              <KeyRound className="h-4 w-4" />
+              Generate a key pair
+            </Button>
+            <Button variant="secondary" onClick={() => onSelectTab("network")}>
+              <MessageSquare className="h-4 w-4" />
+              Try peer chat
+            </Button>
+          </div>
+        </div>
+      </StaggerItem>
+
+      <StaggerItem>
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr] lg:gap-5">
+          <Card>
+            <CardBody>
+              <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">
+                A sensible first run
               </h2>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-                Start with key generation, then move through encryption, signatures, and the
-                WebRTC chat flow without leaving the browser or sending your private keys anywhere.
-              </p>
+              <ol className="mt-4 space-y-4">
+                {FIRST_RUN_STEPS.map((step, index) => (
+                  <li key={step.title} className="flex gap-3.5">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] font-mono text-xs text-zinc-400">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0 pt-0.5">
+                      <p className="text-sm font-medium text-zinc-200">{step.title}</p>
+                      <p className="mt-0.5 text-[13px] leading-5 text-zinc-500">{step.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </CardBody>
+          </Card>
 
-              <div className="mt-7 flex flex-wrap gap-3">
-                <NeonButton onClick={() => onSelectTab("keygen")}>
-                  <Lock className="h-4 w-4" />
-                  Generate keys
-                </NeonButton>
-                <NeonButton
-                  variant="secondary"
-                  onClick={() => onSelectTab("network")}
-                >
-                  <Network className="h-4 w-4" />
-                  Open network lab
-                </NeonButton>
-              </div>
-            </div>
+          <div className="flex flex-col gap-4 lg:gap-5">
+            <Card className="flex-1">
+              <CardBody>
+                <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">
+                  What runs where
+                </h2>
+                <div className="mt-4 space-y-4 text-[13px] leading-6">
+                  <div>
+                    <p className="font-medium text-zinc-300">On this device</p>
+                    <p className="mt-0.5 text-zinc-500">
+                      Key generation, encryption, decryption, signing, and wallet storage. Keys
+                      never leave the browser unless you export them.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-zinc-300">Over the network</p>
+                    <p className="mt-0.5 text-zinc-500">
+                      Peer chat uses a PeerJS server so two browsers can find each other. The
+                      messages themselves travel directly between peers, encrypted with the
+                      recipient&apos;s public key.
+                    </p>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
 
-            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-              <div className="metric-tile">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                  Privacy
+            <Card>
+              <CardBody>
+                <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">
+                  About textbook RSA
+                </h2>
+                <p className="mt-2 text-[13px] leading-6 text-zinc-500">
+                  The Encrypt tab includes a raw, unpadded mode. It exists to show why padding
+                  matters: without it, identical plaintexts produce identical ciphertexts. Use
+                  OAEP for anything you care about.
                 </p>
-                <p className="mt-2 text-lg font-semibold text-white">Client-side only</p>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Keys stay in your browser unless you export them yourself.
-                </p>
-              </div>
-              <div className="metric-tile">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                  Interop
-                </p>
-                <p className="mt-2 text-lg font-semibold text-white">PEM + JSON</p>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Use the app for demos, then move the same identities into other tools.
-                </p>
-              </div>
-              <div className="metric-tile">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                  Workflow
-                </p>
-                <p className="mt-2 text-lg font-semibold text-white">One tab per task</p>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Jump between focused tools without losing your place in the workspace.
-                </p>
-              </div>
-            </div>
+              </CardBody>
+            </Card>
           </div>
-        </Card>
-      </FadeIn>
+        </div>
+      </StaggerItem>
 
-      <FadeIn delay={0.08} className="grid gap-4 lg:grid-cols-3">
-        <Card className="px-5 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-cyan-100">
-              <Home className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Step 1</p>
-              <h3 className="mt-1 text-xl font-semibold text-white">Generate or import keys</h3>
-            </div>
-          </div>
-          <p className="mt-4 text-sm leading-7 text-slate-400">
-            Start in KeyGen to create an identity, then save it to the wallet for quick access
-            across the rest of the app.
-          </p>
-        </Card>
-
-        <Card className="px-5 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-indigo-400/20 bg-indigo-400/10 text-indigo-100">
-              <PenTool className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Step 2</p>
-              <h3 className="mt-1 text-xl font-semibold text-white">Encrypt or sign</h3>
-            </div>
-          </div>
-          <p className="mt-4 text-sm leading-7 text-slate-400">
-            Use focused tabs for encryption, decryption, signatures, and verification instead of
-            crowding all workflows into a single long page.
-          </p>
-        </Card>
-
-        <Card className="px-5 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-100">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Step 3</p>
-              <h3 className="mt-1 text-xl font-semibold text-white">Test the full flow</h3>
-            </div>
-          </div>
-          <p className="mt-4 text-sm leading-7 text-slate-400">
-            Move into the Network tab to exchange peer IDs and test end-to-end encrypted chat with
-            identities from the wallet.
-          </p>
-        </Card>
-      </FadeIn>
-    </div>
+      <StaggerItem>
+        <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">The tools</h2>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {TOOLS.map((tool) => {
+            const Icon = tool.icon;
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => onSelectTab(tool.id)}
+                title={tool.description}
+                className="group flex items-center gap-3.5 rounded-xl border border-white/[0.08] bg-surface px-4 py-3.5 text-left transition-colors duration-150 hover:border-white/[0.16] hover:bg-surface-raised"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-zinc-400 transition-colors duration-150 group-hover:text-indigo-300">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-zinc-200">{tool.name}</span>
+                  <span className="mt-0.5 block truncate text-[13px] text-zinc-500">
+                    {tool.description}
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-zinc-700 transition-colors duration-150 group-hover:text-zinc-400" />
+              </button>
+            );
+          })}
+        </div>
+      </StaggerItem>
+    </StaggerGroup>
   );
 }

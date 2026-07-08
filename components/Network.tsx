@@ -1,270 +1,101 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Peer, { DataConnection } from "peerjs";
+import { useEffect, useId, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
   Check,
+  ChevronDown,
   Copy,
+  Fingerprint,
   MessageSquare,
-  Network as NetworkIcon,
-  RefreshCcw,
+  Play,
+  RotateCcw,
   Send,
-  ShieldCheck,
-  Users,
 } from "lucide-react";
-import {
-  decryptSegmentOAEP,
-  dictToPrivJwk,
-  dictToPubJwk,
-  encryptSegmentOAEP,
-  segmentMessage,
-} from "@/lib/rsa";
+import { useNetwork } from "@/components/NetworkContext";
 import { useToast } from "@/components/ToastContext";
 import { useWallet } from "@/components/WalletContext";
-import { Card, FadeIn, NeonButton } from "@/components/ui/Motion";
-
-interface ChatMessage {
-  id: string;
-  sender: "me" | "peer";
-  text: string;
-  timestamp: number;
-}
-
-interface PeerPayload {
-  type: "PUB_KEY" | "MSG";
-  key?: { n: string; e: string };
-  encrypted?: { segments: string[]; oaep: boolean };
-}
+import {
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  Collapse,
+  EmptyState,
+  FadeIn,
+  IconButton,
+  SPRING_SOFT,
+} from "@/components/ui/Motion";
+import { useCopy } from "@/components/ui/useCopy";
 
 export default function NetworkTab() {
   const { keys, isLocked } = useWallet();
+  const {
+    selectedKeyId,
+    setSelectedKeyId,
+    peerId,
+    remotePeerId,
+    setRemotePeerId,
+    connected,
+    peerPubKey,
+    myFingerprint,
+    peerFingerprint,
+    messages,
+    status,
+    chatState,
+    clearUnread,
+    initPeer,
+    connectToPeer,
+    sendMessage,
+    resetSession,
+  } = useNetwork();
   const toast = useToast();
-  const [selectedKeyId, setSelectedKeyId] = useState("");
-  const [peerId, setPeerId] = useState("");
-  const [remotePeerId, setRemotePeerId] = useState("");
-  const [connection, setConnection] = useState<DataConnection | null>(null);
-  const [peerPubKey, setPeerPubKey] = useState<{ n: string; e: string } | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { copied, copy } = useCopy();
+  const identitySelectId = useId();
+  const remoteIdInputId = useId();
+
   const [inputText, setInputText] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [status, setStatus] = useState("Disconnected");
+  const [openCipherId, setOpenCipherId] = useState<string | null>(null);
 
-  const peerInstance = useRef<Peer | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(messages.length);
+  // Messages from before this tab was (re)opened render without an entrance
+  // animation; only genuinely new ones spring in.
+  const mountTimeRef = useRef(Date.now());
 
-  const selectedKey = useMemo(
-    () => keys.find((key) => key.id === selectedKeyId),
-    [keys, selectedKeyId]
-  );
+  // The session lives in NetworkContext, so this view marks messages as seen
+  // whenever it is open.
+  useEffect(() => {
+    clearUnread();
+  }, [clearUnread, messages.length]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    return () => {
-      peerInstance.current?.destroy();
-    };
+    const list = messageListRef.current;
+    if (list) {
+      list.scrollTop = list.scrollHeight;
+    }
   }, []);
 
-  const resetSession = (preserveIdentity = true) => {
-    connection?.close();
-    peerInstance.current?.destroy();
-    peerInstance.current = null;
-    setPeerId("");
-    setRemotePeerId("");
-    setConnection(null);
-    setPeerPubKey(null);
-    setMessages([]);
-    setInputText("");
-    setStatus("Disconnected");
-
-    if (!preserveIdentity) {
-      setSelectedKeyId("");
-    }
-  };
-
-  const sendPublicKey = (conn: DataConnection) => {
-    const publicKey = selectedKey?.keys.public;
-    if (!publicKey) {
+  useEffect(() => {
+    const list = messageListRef.current;
+    const added = messages.length > prevCountRef.current;
+    prevCountRef.current = messages.length;
+    if (!list || !added) {
       return;
     }
 
-    conn.send({ type: "PUB_KEY", key: publicKey } satisfies PeerPayload);
-  };
-
-  const receiveMessage = async (encryptedPayload?: { segments: string[]; oaep: boolean }) => {
-    if (!encryptedPayload?.segments?.length || !selectedKey?.keys.private) {
-      return;
+    // Follow the conversation unless the reader has scrolled up on purpose.
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.sender === "me" || distanceFromBottom < 160) {
+      list.scrollTop = list.scrollHeight;
     }
+  }, [messages]);
 
-    try {
-      const privJwk = dictToPrivJwk(selectedKey.keys.private);
-      const decryptedSegments = await Promise.all(
-        encryptedPayload.segments.map((segment) => decryptSegmentOAEP(segment, privJwk))
-      );
-      const failedSegments = decryptedSegments.filter((segment) =>
-        segment.startsWith("[Decryption error:")
-      );
-
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          sender: "peer",
-          text:
-            failedSegments.length > 0
-              ? `${decryptedSegments
-                  .filter((segment) => !segment.startsWith("[Decryption error:"))
-                  .join("")}\n\n[One or more segments could not be decrypted.]`.trim()
-              : decryptedSegments.join(""),
-          timestamp: Date.now(),
-        },
-      ]);
-
-      if (failedSegments.length > 0) {
-        toast.error({
-          title: "Incoming message was incomplete",
-          description:
-            "At least one encrypted segment could not be decrypted with the selected identity.",
-        });
-      }
-    } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          sender: "peer",
-          text: "[Decryption failed]",
-          timestamp: Date.now(),
-        },
-      ]);
-      toast.error({
-        title: "Incoming message failed",
-        description:
-          error instanceof Error ? error.message : "The payload could not be decrypted.",
-      });
-    }
-  };
-
-  const attachConnection = (conn: DataConnection, origin: "incoming" | "outgoing") => {
-    setConnection(conn);
-    setStatus(origin === "incoming" ? "Incoming peer detected..." : "Opening secure channel...");
-
-    conn.on("open", () => {
-      setStatus("Secure channel established");
-      sendPublicKey(conn);
-      toast.success({
-        title: "Peer connected",
-        description: "Public keys are now being exchanged for encrypted chat.",
-      });
-    });
-
-    conn.on("data", async (raw) => {
-      const data = raw as PeerPayload;
-
-      if (data.type === "PUB_KEY" && data.key?.n && data.key?.e) {
-        setPeerPubKey(data.key);
-        setStatus("Peer key verified");
-        return;
-      }
-
-      if (data.type === "MSG") {
-        await receiveMessage(data.encrypted);
-      }
-    });
-
-    conn.on("close", () => {
-      setConnection(null);
-      setPeerPubKey(null);
-      setStatus("Disconnected");
-      toast.info({
-        title: "Peer disconnected",
-        description: "The secure channel was closed.",
-      });
-    });
-
-    conn.on("error", (error) => {
-      setStatus(`Connection error: ${error.message}`);
-      toast.error({
-        title: "Connection error",
-        description: error.message,
-      });
-    });
-  };
-
-  const initPeer = () => {
-    if (!selectedKeyId) {
-      toast.info({
-        title: "Choose an identity first",
-        description: "Select a saved key so the network tab can exchange your public key.",
-      });
-      return;
-    }
-
-    resetSession(true);
-    setStatus("Initializing local node...");
-
-    const peer = new Peer();
-    peer.on("open", (id) => {
-      setPeerId(id);
-      setStatus("Waiting for peer...");
-    });
-    peer.on("connection", (conn) => attachConnection(conn, "incoming"));
-    peer.on("disconnected", () => setStatus("Peer server disconnected"));
-    peer.on("error", (error) => {
-      setStatus(`Network error: ${error.message}`);
-      toast.error({
-        title: "Network error",
-        description: error.message,
-      });
-    });
-
-    peerInstance.current = peer;
-  };
-
-  const connectToPeer = () => {
-    if (!peerInstance.current || !remotePeerId.trim()) {
-      return;
-    }
-
-    const conn = peerInstance.current.connect(remotePeerId.trim());
-    attachConnection(conn, "outgoing");
-  };
-
-  const sendMessage = async () => {
-    if (!connection || !peerPubKey || !inputText.trim()) {
-      return;
-    }
-
-    const plainText = inputText.trim();
-    setInputText("");
-
-    try {
-      const pubJwk = dictToPubJwk(peerPubKey.n, peerPubKey.e);
-      const modulus = BigInt(peerPubKey.n);
-      const keyBits = modulus.toString(2).length;
-      const keyBytes = Math.ceil(keyBits / 8);
-      const maxSegBytes = keyBytes - 66;
-      const segments = segmentMessage(plainText, maxSegBytes > 0 ? maxSegBytes : 32);
-      const encryptedSegments = await Promise.all(
-        segments.map((segment) => encryptSegmentOAEP(segment, pubJwk))
-      );
-
-      connection.send({
-        type: "MSG",
-        encrypted: { segments: encryptedSegments, oaep: true },
-      } satisfies PeerPayload);
-
-      setMessages((current) => [
-        ...current,
-        { id: crypto.randomUUID(), sender: "me", text: plainText, timestamp: Date.now() },
-      ]);
-    } catch (error) {
-      toast.error({
-        title: "Message failed",
-        description: error instanceof Error ? error.message : "Encryption could not complete.",
-      });
+  const handleSend = async () => {
+    const ok = await sendMessage(inputText);
+    if (ok) {
+      setInputText("");
     }
   };
 
@@ -273,261 +104,297 @@ export default function NetworkTab() {
       return;
     }
 
-    try {
-      await navigator.clipboard.writeText(peerId);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-      toast.success({
-        title: "Peer ID copied",
-        description: "Share it with your partner to establish a secure channel.",
-      });
-    } catch {
+    const ok = await copy(peerId, "peer-id");
+    if (!ok) {
       toast.error({
         title: "Copy failed",
-        description: "Clipboard access was blocked by the browser.",
+        description: "The browser blocked clipboard access.",
       });
     }
   };
 
-  const statusTone = peerPubKey
-    ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200"
-    : connection
-      ? "border-amber-500/20 bg-amber-500/10 text-amber-100"
-      : "border-white/10 bg-white/5 text-slate-300";
-
   return (
-    <div className="space-y-6">
-      <FadeIn className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <Card className="space-y-6 px-5 py-6">
+    <FadeIn className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+      <Card className="self-start">
+        <CardHeader
+          title="Connection"
+          description="Both sides start a node, then one of them enters the other's ID. The session stays alive while you use other tabs."
+        />
+        <CardBody className="space-y-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-              Peer setup
-            </p>
-            <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-white">
-              <Users className="h-5 w-5 text-cyan-300" />
-              Secure channel
-            </h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              Choose an identity, initialize your peer node, then exchange IDs with a partner.
-              CrypticComm shares public keys automatically after the connection opens.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                1. Select identity
-              </label>
-              {isLocked ? (
-                <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                  Unlock your wallet to pick a saved identity for chat.
-                </div>
-              ) : keys.length === 0 ? (
-                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                  Save a generated key to the wallet before using the network tab.
-                </div>
-              ) : (
-                <select
-                  value={selectedKeyId}
-                  onChange={(event) => setSelectedKeyId(event.target.value)}
-                  disabled={!!peerId}
-                  className="field-input"
-                >
-                  <option value="">Choose a wallet identity</option>
-                  {keys.map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <NeonButton
-                onClick={initPeer}
-                disabled={!selectedKeyId || isLocked}
-                className="w-full"
-              >
-                <NetworkIcon className="h-4 w-4" />
-                {peerId ? "Reinitialize node" : "Initialize node"}
-              </NeonButton>
-              <NeonButton
-                variant="secondary"
-                onClick={() => resetSession(false)}
-                disabled={!peerId && !connection}
-                className="w-full"
-              >
-                <RefreshCcw className="h-4 w-4" />
-                Reset session
-              </NeonButton>
-            </div>
-
-            <div className={`rounded-[24px] border px-4 py-4 ${statusTone}`}>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.26em]">
-                  Status
-                </span>
-                {peerPubKey && (
-                  <span className="status-badge border-emerald-500/20 bg-emerald-500/10 text-emerald-100">
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    Peer key verified
-                  </span>
-                )}
+            <label className="field-label" htmlFor={identitySelectId}>
+              1. Choose an identity
+            </label>
+            {isLocked ? (
+              <div className="notice-neutral">
+                Unlock the wallet from the header to pick a saved identity.
               </div>
-              <p className="mt-3 text-sm font-medium">{status}</p>
-            </div>
-
-            {peerId && (
-              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  2. Share your peer ID
-                </label>
-                <div className="flex gap-2">
-                  <input readOnly value={peerId} className="field-input font-mono text-xs" />
-                  <button
-                    type="button"
-                    onClick={copyPeerId}
-                    className="icon-btn shrink-0"
-                    aria-label="Copy peer ID"
-                  >
-                    {copied ? (
-                      <Check className="h-4 w-4 text-emerald-300" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {peerId && !connection && (
-              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  3. Connect to a peer
-                </label>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_152px]">
-                  <input
-                    value={remotePeerId}
-                    onChange={(event) => setRemotePeerId(event.target.value)}
-                    placeholder="Paste the remote peer ID"
-                    className="field-input font-mono text-xs"
-                  />
-                  <NeonButton onClick={connectToPeer} disabled={!remotePeerId.trim()} className="w-full">
-                    Connect
-                  </NeonButton>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card>
-
-        <Card className="flex min-h-[620px] flex-col border-cyan-400/20 px-5 py-6">
-          <div className="mb-5 flex flex-col gap-4 border-b border-white/10 pb-5 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-white">
-                <MessageSquare className="h-5 w-5 text-cyan-300" />
-                Encrypted chat
-              </h2>
-              <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-400">
-                Every outgoing message is encrypted with the remote public key before it leaves
-                your browser.
-              </p>
-            </div>
-            <div className="inline-flex h-12 items-center rounded-2xl border border-white/10 bg-white/5 px-4 text-sm font-medium text-slate-300">
-              {messages.length} message{messages.length === 1 ? "" : "s"}
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto pr-1">
-            {messages.length === 0 ? (
-              <div className="flex min-h-[320px] h-full flex-col items-center justify-center rounded-[28px] border border-dashed border-white/10 bg-white/5 px-6 text-center">
-                <NetworkIcon className="h-10 w-10 text-slate-600" />
-                <h3 className="mt-4 text-2xl font-semibold tracking-tight text-white">
-                  No secure messages yet
-                </h3>
-                <p className="mt-3 max-w-md text-sm leading-7 text-slate-400">
-                  Once both peers exchange IDs and public keys, messages will appear here in an
-                  encrypted conversation timeline.
-                </p>
+            ) : keys.length === 0 ? (
+              <div className="notice-neutral">
+                The wallet is empty. Generate a key pair in the Keys tab and save it first.
               </div>
             ) : (
-              <div className="space-y-4">
-                {messages.map((message) => (
-                  <div
+              <select
+                id={identitySelectId}
+                value={selectedKeyId}
+                onChange={(event) => setSelectedKeyId(event.target.value)}
+                disabled={!!peerId}
+                className="field-input"
+              >
+                <option value="">Choose a wallet identity</option>
+                {keys.map((key) => (
+                  <option key={key.id} value={key.id}>
+                    {key.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div>
+            <span className="field-label">2. Start your node</span>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+              <Button onClick={initPeer} disabled={!selectedKeyId || isLocked}>
+                <Play className="h-4 w-4" />
+                {peerId ? "Restart node" : "Start node"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => resetSession(false)}
+                disabled={!peerId && !connected}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reset
+              </Button>
+            </div>
+          </div>
+
+          {peerId && (
+            <div>
+              <span className="field-label">3. Share your peer ID</span>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={peerId}
+                  aria-label="Your peer ID"
+                  className="field-input font-mono !text-xs"
+                />
+                <IconButton label="Copy peer ID" onClick={copyPeerId} className="h-10 w-10 shrink-0">
+                  {copied === "peer-id" ? (
+                    <Check className="h-4 w-4 animate-pop text-emerald-400" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </IconButton>
+              </div>
+            </div>
+          )}
+
+          {peerId && !connected && (
+            <div>
+              <label className="field-label" htmlFor={remoteIdInputId}>
+                4. Or connect to a peer
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id={remoteIdInputId}
+                  value={remotePeerId}
+                  onChange={(event) => setRemotePeerId(event.target.value)}
+                  placeholder="Paste the remote peer ID"
+                  className="field-input font-mono !text-xs"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={connectToPeer}
+                  disabled={!remotePeerId.trim()}
+                  className="shrink-0"
+                >
+                  Connect
+                </Button>
+              </div>
+              <p className="mt-1.5 text-xs leading-4 text-zinc-600">
+                Only one side needs to do this step.
+              </p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] pt-3.5">
+            <span className="text-xs text-zinc-500">Status</span>
+            <span
+              className={
+                chatState === "ready"
+                  ? "chip-success"
+                  : chatState === "offline"
+                    ? "chip-neutral"
+                    : "chip-warning"
+              }
+            >
+              {status}
+            </span>
+          </div>
+
+          {myFingerprint && (
+            <div className="rounded-lg border border-white/[0.06] bg-surface-inset px-3.5 py-3">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-zinc-400">
+                <Fingerprint className="h-3.5 w-3.5" />
+                Key fingerprints
+              </p>
+              <dl className="mt-2.5 space-y-1.5 font-mono text-[11px] leading-4">
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="shrink-0 text-zinc-600">You</dt>
+                  <dd className="truncate text-zinc-300">{myFingerprint}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="shrink-0 text-zinc-600">Peer</dt>
+                  <dd className={peerFingerprint ? "truncate text-zinc-300" : "text-zinc-600"}>
+                    {peerFingerprint ?? "waiting for key"}
+                  </dd>
+                </div>
+              </dl>
+              {peerFingerprint && (
+                <p className="mt-2.5 text-[11px] leading-4 text-zinc-600">
+                  Read these to each other over a call or in person. Matching fingerprints
+                  rule out a swapped key in the middle.
+                </p>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card className="flex min-h-[30rem] flex-col xl:min-h-[36rem]">
+        <CardHeader
+          title="Conversation"
+          description="Messages are encrypted with the peer's public key before they leave this browser."
+          actions={
+            messages.length > 0 ? (
+              <span className="chip-neutral">
+                {messages.length} message{messages.length === 1 ? "" : "s"}
+              </span>
+            ) : undefined
+          }
+        />
+
+        <div ref={messageListRef} className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          {messages.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <EmptyState
+                icon={<MessageSquare className="h-4 w-4" />}
+                title="No messages yet"
+                className="w-full max-w-sm border-none bg-transparent"
+              >
+                {chatState === "ready"
+                  ? "The encrypted channel is up. Say something."
+                  : "Once both peers are connected and keys are exchanged, the conversation shows up here."}
+              </EmptyState>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {messages.map((message) => {
+                const isNew = message.timestamp >= mountTimeRef.current;
+                const cipherOpen = openCipherId === message.id;
+                return (
+                  <motion.div
                     key={message.id}
+                    initial={isNew ? { opacity: 0, y: 10, scale: 0.97 } : false}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={SPRING_SOFT}
                     className={`flex ${message.sender === "me" ? "justify-end" : "justify-start"}`}
                   >
                     <div
-                      className={`max-w-[85%] rounded-[26px] border px-4 py-3 ${
+                      className={`max-w-[85%] rounded-xl px-3.5 py-2.5 sm:max-w-[70%] ${
                         message.sender === "me"
-                          ? "border-cyan-400/20 bg-[linear-gradient(135deg,rgba(34,211,238,0.18),rgba(67,97,238,0.22))] text-cyan-50"
-                          : "border-white/10 bg-white/5 text-slate-100"
+                          ? "bg-indigo-600/25 text-zinc-100"
+                          : "border border-white/[0.06] bg-white/[0.04] text-zinc-200"
                       }`}
                     >
-                      <p className="whitespace-pre-wrap text-sm leading-7">{message.text}</p>
-                      <p className="mt-2 text-[11px] uppercase tracking-[0.24em] text-white/50">
-                        {message.sender === "me" ? "You" : "Peer"} ·{" "}
-                        {new Date(message.timestamp).toLocaleTimeString()}
+                      <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                        {message.text}
                       </p>
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <p className="text-[11px] text-zinc-500">
+                          {message.sender === "me" ? "You" : "Peer"},{" "}
+                          {new Date(message.timestamp).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                        {message.segments && message.segments.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setOpenCipherId(cipherOpen ? null : message.id)}
+                            aria-expanded={cipherOpen}
+                            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-zinc-500 transition-colors duration-150 hover:bg-white/[0.06] hover:text-zinc-300"
+                          >
+                            Ciphertext
+                            <ChevronDown
+                              className={`h-3 w-3 transition-transform duration-200 ${
+                                cipherOpen ? "rotate-180" : ""
+                              }`}
+                            />
+                          </button>
+                        )}
+                      </div>
+                      {message.segments && (
+                        <Collapse open={cipherOpen}>
+                          <div className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-white/[0.06] bg-surface-inset px-2.5 py-2">
+                            <p className="mb-1 text-[10px] font-medium uppercase text-zinc-600">
+                              As sent over the wire ({message.segments.length} RSA segment
+                              {message.segments.length === 1 ? "" : "s"})
+                            </p>
+                            <p className="break-all font-mono text-[10px] leading-4 text-zinc-500">
+                              {message.segments.join("\n\n")}
+                            </p>
+                          </div>
+                        </Collapse>
+                      )}
                     </div>
-                  </div>
-                ))}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
-          </div>
-
-          <div className="mt-5 border-t border-white/10 pt-5">
-            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-400">
-                {peerPubKey
-                  ? "Peer public key received. Messages are ready to encrypt."
-                  : "Chat will unlock after the peer public key arrives."}
-              </p>
-              {peerPubKey && (
-                <span className="status-badge border-emerald-500/20 bg-emerald-500/10 text-emerald-100">
-                  Ready
-                </span>
-              )}
+                  </motion.div>
+                );
+              })}
             </div>
+          )}
+        </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-[rgba(5,9,21,0.78)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-              <textarea
-                value={inputText}
-                onChange={(event) => setInputText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void sendMessage();
-                  }
-                }}
-                rows={4}
-                disabled={!connection || !peerPubKey}
-                placeholder={
-                  connection
-                    ? "Type an encrypted message. Press Enter to send, Shift+Enter for a new line."
-                    : "Initialize and connect to a peer first."
+        <div className="border-t border-white/[0.06] p-3 sm:p-4">
+          <div className="flex items-end gap-2">
+            <textarea
+              value={inputText}
+              onChange={(event) => setInputText(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  void handleSend();
                 }
-                className="min-h-[156px] w-full resize-none border-0 bg-transparent px-3 py-2 font-mono text-sm leading-7 text-slate-100 placeholder:text-slate-500 focus:outline-none"
-              />
-              <div className="mt-3 flex flex-col gap-3 border-t border-white/10 px-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs leading-6 text-slate-500">
-                  Press Enter to send. Use Shift+Enter for a new line.
-                </p>
-                <NeonButton
-                  onClick={sendMessage}
-                  disabled={!connection || !peerPubKey || !inputText.trim()}
-                  className="w-full sm:w-auto sm:min-w-[150px]"
-                >
-                  <Send className="h-4 w-4" />
-                  Send
-                </NeonButton>
-              </div>
-            </div>
+              }}
+              rows={2}
+              disabled={!connected || !peerPubKey}
+              placeholder={
+                chatState === "ready"
+                  ? "Type a message"
+                  : "Connect to a peer to start chatting"
+              }
+              aria-label="Chat message"
+              className="field-input min-h-[3.5rem] flex-1 resize-none font-sans"
+            />
+            <Button
+              onClick={handleSend}
+              disabled={!connected || !peerPubKey || !inputText.trim()}
+              aria-label="Send message"
+              className="h-10 w-12 shrink-0 px-0"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
-        </Card>
-      </FadeIn>
-    </div>
+          <p className="mt-2 hidden text-xs text-zinc-600 sm:block">
+            Enter sends. Shift+Enter adds a line break.
+          </p>
+        </div>
+      </Card>
+    </FadeIn>
   );
 }

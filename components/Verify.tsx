@@ -1,28 +1,35 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  CheckCircle2,
-  FileSignature,
-  Fingerprint,
-  RefreshCcw,
-  ShieldCheck,
-  XCircle,
-} from "lucide-react";
-import { dictToPubJwk, pemToRSAKeyDict, verifySignature } from "@/lib/rsa";
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { CheckCircle2, RotateCcw, XCircle } from "lucide-react";
+import { dictToPubJwk, parsePublicKeyInput, verifySignature } from "@/lib/rsa";
 import { useHistory } from "@/components/HistoryContext";
 import { useToast } from "@/components/ToastContext";
 import { useWallet } from "@/components/WalletContext";
-import { Card, FadeIn, FileUpload, NeonButton } from "@/components/ui/Motion";
-
-interface ParsedPublicKey {
-  n: string;
-  e: string;
-}
+import { useWorkbench } from "@/components/WorkbenchContext";
+import {
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  FadeIn,
+  FileUpload,
+  SPRING_POP,
+  SPRING_SOFT,
+} from "@/components/ui/Motion";
+import {
+  KeyStatusLine,
+  SelectedIdentityNotice,
+  useParsedKeyInfo,
+  WalletKeyPicker,
+} from "@/components/ui/KeyInput";
 
 export default function Verify() {
   const { keys } = useWallet();
   const { addHistory } = useHistory();
+  const { consumeVerifyHandoff } = useWorkbench();
   const toast = useToast();
 
   const [pubKeyInput, setPubKeyInput] = useState("");
@@ -33,36 +40,30 @@ export default function Verify() {
   const [error, setError] = useState<string | null>(null);
   const [selectedWalletKeyId, setSelectedWalletKeyId] = useState("");
 
+  // Pick up a message and signature handed over from the Sign tab. The key is
+  // left for the user to choose; needing the right public key is the lesson.
+  useEffect(() => {
+    const handoff = consumeVerifyHandoff();
+    if (handoff) {
+      setMessage(handoff.message);
+      setSignature(handoff.signature);
+    }
+  }, [consumeVerifyHandoff]);
+
   const selectedWalletKey = useMemo(
     () => keys.find((key) => key.id === selectedWalletKeyId),
     [keys, selectedWalletKeyId]
   );
+  const keyInfo = useParsedKeyInfo(pubKeyInput, "public");
 
-  const parsePublicKey = async (rawInput: string): Promise<ParsedPublicKey> => {
-    const trimmedInput = rawInput.trim();
-
-    if (trimmedInput.startsWith("-----BEGIN PUBLIC KEY-----")) {
-      return pemToRSAKeyDict(trimmedInput, "public");
+  // If the selected wallet identity disappears (wallet locked, key deleted),
+  // scrub the key material that came from it.
+  useEffect(() => {
+    if (selectedWalletKeyId && !selectedWalletKey) {
+      setSelectedWalletKeyId("");
+      setPubKeyInput("");
     }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmedInput);
-    } catch {
-      throw new Error("Public key must be valid JSON or a PEM block.");
-    }
-
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      typeof (parsed as ParsedPublicKey).n !== "string" ||
-      typeof (parsed as ParsedPublicKey).e !== "string"
-    ) {
-      throw new Error("Public key JSON must include string values for n and e.");
-    }
-
-    return parsed as ParsedPublicKey;
-  };
+  }, [selectedWalletKey, selectedWalletKeyId]);
 
   const handleVerify = async () => {
     setError(null);
@@ -71,10 +72,10 @@ export default function Verify() {
 
     try {
       if (!pubKeyInput.trim() || !message.trim() || !signature.trim()) {
-        throw new Error("Public key, message, and signature are required.");
+        throw new Error("A public key, the message, and the signature are all required.");
       }
 
-      const pubKeyData = await parsePublicKey(pubKeyInput);
+      const pubKeyData = await parsePublicKeyInput(pubKeyInput);
       const pubJwk = dictToPubJwk(pubKeyData.n, pubKeyData.e);
       const isValid = await verifySignature(message, signature.trim(), pubJwk);
 
@@ -83,17 +84,16 @@ export default function Verify() {
         type: "Verify",
         details: {
           message,
-          output: `Signature was ${isValid ? "valid" : "invalid"}.`,
+          output: isValid ? "Signature was valid." : "Signature was invalid.",
           keyName: selectedWalletKey?.name,
           status: isValid ? "Success" : "Invalid",
         },
       });
-      toast[isValid ? "success" : "info"]({
-        title: isValid ? "Signature verified" : "Signature did not match",
-        description: isValid
-          ? "The message and signer public key match this signature."
-          : "The signature, message, or key does not line up.",
-      });
+      if (isValid) {
+        toast.success({ title: "Signature verified" });
+      } else {
+        toast.error({ title: "Signature doesn't match" });
+      }
     } catch (error) {
       const messageText =
         error instanceof Error ? error.message : "The signature could not be verified.";
@@ -117,234 +117,192 @@ export default function Verify() {
   };
 
   return (
-    <div className="space-y-6">
-      <FadeIn className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-6">
-          <Card className="px-5 py-6">
-            <div className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Signer identity
-                </p>
-                <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-white">
-                  <ShieldCheck className="h-5 w-5 text-cyan-300" />
-                  Public key
-                </h2>
-                <p className="mt-2 text-sm leading-7 text-slate-400">
-                  Load the signer public key used to check the signature.
-                </p>
-              </div>
+    <FadeIn className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_370px]">
+      <div className="space-y-4">
+        <Card>
+          <CardHeader
+            title="Signer's public key"
+            description="Verification proves the message was signed by whoever holds the matching private key."
+            actions={
               <FileUpload
                 onFileSelect={(data) => {
                   setPubKeyInput(data);
                   setSelectedWalletKeyId("");
                 }}
-                label="Load key"
+                label="Load JSON or PEM"
                 accept=".json,.pem,.txt"
               />
-            </div>
-
-            {keys.length > 0 && (
-              <div className="mt-5">
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  Saved identities
-                </label>
-                <select
-                  onChange={(event) => {
-                    const key = keys.find((entry) => entry.id === event.target.value);
-                    if (key) {
-                      setSelectedWalletKeyId(key.id);
-                      setPubKeyInput(JSON.stringify(key.keys.public, null, 2));
-                    } else {
-                      setSelectedWalletKeyId("");
-                      setPubKeyInput("");
-                    }
-                  }}
-                  value={selectedWalletKeyId}
-                  className="field-input"
-                >
-                  <option value="">Choose a wallet identity</option>
-                  {keys.map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            }
+          />
+          <CardBody>
+            <WalletKeyPicker
+              selectedId={selectedWalletKeyId}
+              onSelect={(key) => {
+                if (key) {
+                  setSelectedWalletKeyId(key.id);
+                  setPubKeyInput(JSON.stringify(key.keys.public, null, 2));
+                } else {
+                  setSelectedWalletKeyId("");
+                  setPubKeyInput("");
+                }
+              }}
+            />
+            {selectedWalletKey ? (
+              <SelectedIdentityNotice
+                name={selectedWalletKey.name}
+                detail="Public key loaded from the wallet."
+                onClear={() => setSelectedWalletKeyId("")}
+              />
+            ) : (
+              <textarea
+                value={pubKeyInput}
+                onChange={(event) => {
+                  setPubKeyInput(event.target.value);
+                  setSelectedWalletKeyId("");
+                }}
+                placeholder="Paste a public key as JSON or PEM"
+                aria-label="Signer's public key"
+                className="field-area min-h-[10rem]"
+              />
             )}
+            <KeyStatusLine info={keyInfo} kind="public" />
+          </CardBody>
+        </Card>
 
-            <div className="mt-5">
-              {selectedWalletKey ? (
-                <div className="rounded-[26px] border border-emerald-500/20 bg-emerald-500/10 px-5 py-5">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-emerald-200/80">
-                    Using wallet identity
-                  </p>
-                  <h3 className="mt-2 text-xl font-semibold tracking-tight text-white">
-                    {selectedWalletKey.name}
-                  </h3>
-                  <p className="mt-2 text-sm leading-6 text-emerald-100/80">
-                    The signer public key is loaded and ready for verification.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWalletKeyId("")}
-                    className="mt-4 text-sm font-medium text-cyan-200 transition hover:text-white"
-                  >
-                    Edit raw key
-                  </button>
-                </div>
-              ) : (
-                <textarea
-                  value={pubKeyInput}
-                  onChange={(event) => {
-                    setPubKeyInput(event.target.value);
-                    setSelectedWalletKeyId("");
-                  }}
-                  placeholder="Paste public key JSON or PEM..."
-                  className="field-area min-h-[200px]"
-                />
-              )}
-            </div>
-          </Card>
-
-          <Card className="px-5 py-6">
-            <div className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Original content
-                </p>
-                <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-white">
-                  <FileSignature className="h-5 w-5 text-cyan-300" />
-                  Message
-                </h2>
-                <p className="mt-2 text-sm leading-7 text-slate-400">
-                  The exact message used during signing. Any edit here will invalidate the check.
-                </p>
-              </div>
-              <FileUpload onFileSelect={setMessage} label="Load text" accept=".txt,.md" />
-            </div>
-
+        <Card>
+          <CardHeader
+            title="Original message"
+            description="Has to match what was signed exactly. One changed character fails the check."
+            actions={<FileUpload onFileSelect={setMessage} label="Load text" accept=".txt,.md" />}
+          />
+          <CardBody>
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
-              placeholder="Paste the original message..."
-              className="field-area mt-5 min-h-[200px] text-sm"
+              placeholder="Paste the original message"
+              aria-label="Original message"
+              className="field-area min-h-[10rem] font-sans text-sm"
             />
-          </Card>
+          </CardBody>
+        </Card>
 
-          <Card className="px-5 py-6">
-            <div className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Signature
-                </p>
-                <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-white">
-                  <Fingerprint className="h-5 w-5 text-cyan-300" />
-                  Hex proof
-                </h2>
-                <p className="mt-2 text-sm leading-7 text-slate-400">
-                  Paste the hexadecimal RSA-PSS signature you want to validate.
-                </p>
-              </div>
-              <FileUpload onFileSelect={setSignature} label="Load text" accept=".txt" />
-            </div>
-
+        <Card>
+          <CardHeader
+            title="Signature"
+            description="The hex string produced by the Sign tab."
+            actions={<FileUpload onFileSelect={setSignature} label="Load text" accept=".txt" />}
+          />
+          <CardBody>
             <textarea
               value={signature}
               onChange={(event) => setSignature(event.target.value)}
-              placeholder="Paste the hex signature..."
-              className="field-area mt-5 min-h-[160px]"
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  if (!loading && pubKeyInput.trim() && message.trim() && signature.trim()) {
+                    void handleVerify();
+                  }
+                }
+              }}
+              placeholder="Paste the hex signature"
+              aria-label="Signature"
+              className="field-area min-h-[8rem]"
             />
-          </Card>
-        </div>
+          </CardBody>
+        </Card>
+      </div>
 
-        <div className="space-y-6">
-          <Card className="px-5 py-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  Action
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                  Verify signature
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={clearAll}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-400 transition hover:border-white/20 hover:text-white"
-              >
-                <RefreshCcw className="h-3.5 w-3.5" />
-                Clear all
-              </button>
-            </div>
-
-            <p className="mt-4 text-sm leading-7 text-slate-400">
-              Verification compares the message, the signature, and the signer public key in one
-              check.
+      <div className="space-y-4">
+        <Card>
+          <CardHeader
+            title="Verify"
+            actions={
+              <Button variant="ghost" size="sm" onClick={clearAll}>
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </Button>
+            }
+          />
+          <CardBody>
+            <p className="text-[13px] leading-5 text-zinc-500">
+              One check ties all three inputs together: the message, the signature, and the
+              key. If any of them changed since signing, verification fails.
             </p>
 
             {error && (
-              <div className="mt-4 rounded-[22px] border border-rose-500/20 bg-rose-500/10 px-4 py-4 text-sm text-rose-100">
+              <div role="alert" className="notice-danger mt-3">
                 {error}
               </div>
             )}
 
-            <NeonButton
+            <Button
               onClick={handleVerify}
               disabled={loading || !pubKeyInput.trim() || !message.trim() || !signature.trim()}
-              className="mt-6 w-full"
+              className="mt-4 w-full"
               size="lg"
+              title="Ctrl+Enter in the signature box also runs this"
             >
-              {loading ? "Verifying..." : "Verify signature"}
-            </NeonButton>
-          </Card>
+              {loading ? "Verifying" : "Verify signature"}
+            </Button>
+          </CardBody>
+        </Card>
 
-          <Card className="px-5 py-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-              Result
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-              Verification status
-            </h2>
-
+        <Card>
+          <CardHeader title="Result" />
+          <CardBody>
             {result === null ? (
-              <div className="mt-5 rounded-[26px] border border-dashed border-white/10 bg-white/5 px-5 py-10 text-center">
-                <p className="text-lg font-semibold text-white">Waiting for a verification run</p>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Run the check to see whether this signature matches the supplied key and message.
-                </p>
-              </div>
-            ) : result ? (
-              <div className="mt-5 rounded-[26px] border border-emerald-500/30 bg-emerald-500/10 px-5 py-8 text-center">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-400/20 text-emerald-100">
-                  <CheckCircle2 className="h-8 w-8" />
-                </div>
-                <h3 className="mt-5 text-2xl font-semibold tracking-tight text-white">
-                  Signature is valid
-                </h3>
-                <p className="mt-3 text-sm leading-7 text-emerald-100/85">
-                  The message, signature, and public key all line up. This content has not been
-                  altered relative to the supplied proof.
-                </p>
-              </div>
+              <EmptyState title="No check run yet">
+                Fill in the three fields and run the verification to see the outcome here.
+              </EmptyState>
             ) : (
-              <div className="mt-5 rounded-[26px] border border-rose-500/30 bg-rose-500/10 px-5 py-8 text-center">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-rose-400/30 bg-rose-400/20 text-rose-100">
-                  <XCircle className="h-8 w-8" />
-                </div>
-                <h3 className="mt-5 text-2xl font-semibold tracking-tight text-white">
-                  Signature is invalid
-                </h3>
-                <p className="mt-3 text-sm leading-7 text-rose-100/85">
-                  The signature does not match this message and public key combination. Either the
-                  content changed, the wrong key was supplied, or the signature was corrupted.
-                </p>
-              </div>
+              <motion.div
+                key={String(result)}
+                initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={SPRING_SOFT}
+                className={`rounded-lg border px-5 py-6 text-center ${
+                  result
+                    ? "border-emerald-500/25 bg-emerald-500/[0.07]"
+                    : "border-rose-500/25 bg-rose-500/[0.07]"
+                }`}
+              >
+                <motion.span
+                  initial={{ scale: 0.3, rotate: result ? -20 : 0 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ ...SPRING_POP, delay: 0.08 }}
+                  className="inline-flex"
+                >
+                  {result ? (
+                    <CheckCircle2 className="h-8 w-8 text-emerald-400" />
+                  ) : (
+                    <XCircle className="h-8 w-8 text-rose-400" />
+                  )}
+                </motion.span>
+                {result ? (
+                  <>
+                    <h3 className="mt-3 text-base font-semibold text-emerald-200">
+                      Signature is valid
+                    </h3>
+                    <p className="mt-1.5 text-[13px] leading-5 text-zinc-400">
+                      The message is untouched and was signed by this key&apos;s owner.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="mt-3 text-base font-semibold text-rose-200">
+                      Signature is invalid
+                    </h3>
+                    <p className="mt-1.5 text-[13px] leading-5 text-zinc-400">
+                      The message was altered, the signature is corrupted, or this isn&apos;t
+                      the signer&apos;s key.
+                    </p>
+                  </>
+                )}
+              </motion.div>
             )}
-          </Card>
-        </div>
-      </FadeIn>
-    </div>
+          </CardBody>
+        </Card>
+      </div>
+    </FadeIn>
   );
 }
