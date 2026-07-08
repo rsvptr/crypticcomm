@@ -3,7 +3,15 @@
   <h1>CrypticComm</h1>
   <p><strong>An RSA workspace that runs entirely in your browser.</strong></p>
   <p>Generate keys, encrypt and decrypt messages, sign and verify, store identities in an encrypted wallet, and chat with another browser over WebRTC. Built with Next.js, React, Tailwind CSS, the Web Crypto API, and PeerJS.</p>
-  <p><a href="https://crypticcomm.vercel.app">crypticcomm.vercel.app</a></p>
+
+  <p>
+    <img src="https://img.shields.io/badge/Next.js-14.2-0a0a0e?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js 14.2" />
+    <img src="https://img.shields.io/badge/React-18-0a0a0e?style=for-the-badge&logo=react&logoColor=61dafb" alt="React 18" />
+    <img src="https://img.shields.io/badge/TypeScript-5-0a0a0e?style=for-the-badge&logo=typescript&logoColor=3178c6" alt="TypeScript 5" />
+    <img src="https://img.shields.io/badge/Tailwind_CSS-3.4-0a0a0e?style=for-the-badge&logo=tailwindcss&logoColor=38bdf8" alt="Tailwind CSS 3.4" />
+    <img src="https://img.shields.io/badge/Vitest-34_passing-0a0a0e?style=for-the-badge&logo=vitest&logoColor=6E9F18" alt="Vitest: 34 tests passing" />
+    <a href="https://crypticcomm.vercel.app"><img src="https://img.shields.io/badge/Vercel-live-0a0a0e?style=for-the-badge&logo=vercel&logoColor=white" alt="Live on Vercel" /></a>
+  </p>
 </div>
 
 > **Note:** CrypticComm started as university coursework. It uses standard browser cryptography and keeps keys local, but it has never been audited. Treat it as a teaching tool, not a secure messaging product.
